@@ -1,7 +1,7 @@
 'use client';
 
 import { PlatformSummary } from '@/app/types/dashboard';
-import { formatCurrency, formatNumber, formatPercent } from '@/app/lib/utils';
+import { formatCurrency, formatNumber, formatPercent, formatROAS, getRoasColor } from '@/app/lib/utils';
 
 const PLATFORM_ICONS: Record<string, string> = {
   Snapchat: '👻',
@@ -20,17 +20,22 @@ function PlatformCard({ platform }: PlatformCardProps) {
 
   const rows = [
     { label: 'الإنفاق', value: formatCurrency(platform.spend) },
-    { label: 'الانطباعات', value: formatNumber(platform.impressions) },
+    { label: 'عدد المبيعات', value: formatNumber(platform.conversions) },
+    { label: 'الإيراد', value: formatCurrency(platform.revenue) },
+    {
+      label: 'ROAS',
+      value: formatROAS(platform.roas),
+      colorClass: getRoasColor(platform.roas),
+    },
+    { label: 'معدل التحويل', value: formatPercent(platform.conversion_rate) },
     { label: 'CTR', value: formatPercent(platform.ctr) },
+    { label: 'CPM', value: formatCurrency(platform.cpm) },
     { label: 'CPC', value: formatCurrency(platform.cpc) },
-    ...(platform.conversions > 0 || isSnapchat
-      ? [{ label: isSnapchat ? 'المبيعات' : 'التحويلات', value: formatNumber(platform.conversions) }]
-      : []),
   ];
 
   return (
     <div
-      className="rounded-xl p-5 border flex flex-col gap-4"
+      className="rounded-xl p-5 border flex flex-col gap-3"
       style={{
         borderColor: platform.color + '44',
         background: `linear-gradient(135deg, ${platform.color}15 0%, transparent 60%)`,
@@ -56,19 +61,11 @@ function PlatformCard({ platform }: PlatformCardProps) {
         {rows.map((row) => (
           <div key={row.label} className="flex justify-between items-center">
             <span className="text-gray-400 text-sm">{row.label}</span>
-            <span className="text-white text-sm font-medium">{row.value}</span>
+            <span className={`text-sm font-medium ${row.colorClass ?? 'text-white'}`}>
+              {row.value}
+            </span>
           </div>
         ))}
-      </div>
-
-      {/* Spend bar indicator */}
-      <div className="mt-1">
-        <div className="h-1 rounded-full bg-gray-700 overflow-hidden">
-          <div
-            className="h-full rounded-full"
-            style={{ width: '100%', backgroundColor: platform.color, opacity: 0.7 }}
-          />
-        </div>
       </div>
     </div>
   );
@@ -84,10 +81,11 @@ export default function PlatformCards({ platforms }: PlatformCardsProps) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       {platforms.map((platform) => (
-        <div key={platform.name} className="relative">
+        <div key={platform.name} className="relative flex flex-col gap-0">
           <PlatformCard platform={platform} />
           {totalSpend > 0 && (
-            <div className="absolute bottom-5 left-5 right-5">
+            <div className="px-5 pb-3 -mt-1 rounded-b-xl"
+              style={{ background: `linear-gradient(135deg, ${platform.color}10 0%, transparent 60%)` }}>
               <div className="h-1 rounded-full bg-gray-700 overflow-hidden">
                 <div
                   className="h-full rounded-full transition-all duration-500"

@@ -87,41 +87,81 @@ export function computePlatformSummaries(data: DashboardData): PlatformSummary[]
     return valid.length > 0 ? valid.reduce((a, b) => a + b, 0) / valid.length : 0;
   }
 
+  // Snapchat
+  const snapSpend = data.snapchat.reduce((s, d) => s + snapToSAR(d.spend || 0), 0);
+  const snapRevenue = data.snapchat.reduce((s, d) => s + snapToSAR(d.conversion_purchases_value || 0), 0);
+  const snapConversions = data.snapchat.reduce((s, d) => s + (d.conversion_purchases || 0), 0);
+  const snapClicks = data.snapchat.reduce((s, d) => s + (d.clicks || 0), 0);
+
+  // Meta
+  const metaSpend = data.meta.reduce((s, d) => s + (d.spend || 0), 0);
+  const metaRevenue = data.meta.reduce((s, d) => s + (d.action_values_purchase || 0), 0);
+  const metaConversions = data.meta.reduce((s, d) => s + (d.actions_purchase || 0), 0);
+  const metaClicks = data.meta.reduce((s, d) => s + (d.clicks || 0), 0);
+
+  // TikTok
+  const tiktokSpend = data.tiktok.reduce((s, d) => s + (d.spend || 0), 0);
+  const tiktokRevenue = data.tiktok.reduce((s, d) => s + ((d.complete_payment_roas || 0) * (d.spend || 0)), 0);
+  const tiktokConversions = data.tiktok.reduce((s, d) => s + (d.conversions || 0), 0);
+  const tiktokClicks = data.tiktok.reduce((s, d) => s + (d.clicks || 0), 0);
+
+  // Google
+  const googleSpend = data.google.reduce((s, d) => s + (d.spend || 0), 0);
+  const googleRevenue = data.google.reduce((s, d) => s + (d.conversion_value || 0), 0);
+  const googleConversions = data.google.reduce((s, d) => s + (d.conversions || 0), 0);
+  const googleClicks = data.google.reduce((s, d) => s + (d.clicks || 0), 0);
+
   return [
     {
       name: 'Snapchat',
-      spend: data.snapchat.reduce((s, d) => s + snapToSAR(d.spend || 0), 0),
+      spend: snapSpend,
       impressions: data.snapchat.reduce((s, d) => s + (d.impressions || 0), 0),
       ctr: avg(data.snapchat.map((d) => d.ctr || 0)),
       cpc: avg(data.snapchat.map((d) => snapToSAR(d.cpc || 0))),
-      conversions: data.snapchat.reduce((s, d) => s + (d.conversion_purchases || 0), 0),
+      cpm: avg(data.snapchat.map((d) => snapToSAR(d.cpm || 0))),
+      conversions: snapConversions,
+      revenue: snapRevenue,
+      roas: snapSpend > 0 ? snapRevenue / snapSpend : 0,
+      conversion_rate: snapClicks > 0 ? (snapConversions / snapClicks) * 100 : 0,
       color: '#FFFC00',
     },
     {
       name: 'Meta',
-      spend: data.meta.reduce((s, d) => s + (d.spend || 0), 0),
+      spend: metaSpend,
       impressions: data.meta.reduce((s, d) => s + (d.impressions || 0), 0),
       ctr: avg(data.meta.map((d) => d.ctr || 0)),
       cpc: avg(data.meta.map((d) => d.cpc || 0)),
-      conversions: 0,
+      cpm: avg(data.meta.map((d) => d.cpm || 0)),
+      conversions: metaConversions,
+      revenue: metaRevenue,
+      roas: metaSpend > 0 ? metaRevenue / metaSpend : 0,
+      conversion_rate: metaClicks > 0 ? (metaConversions / metaClicks) * 100 : 0,
       color: '#1877F2',
     },
     {
       name: 'TikTok',
-      spend: data.tiktok.reduce((s, d) => s + (d.spend || 0), 0),
+      spend: tiktokSpend,
       impressions: data.tiktok.reduce((s, d) => s + (d.impressions || 0), 0),
       ctr: avg(data.tiktok.map((d) => d.ctr || 0)),
       cpc: avg(data.tiktok.map((d) => d.cpc || 0)),
-      conversions: data.tiktok.reduce((s, d) => s + (d.conversions || 0), 0),
+      cpm: avg(data.tiktok.map((d) => d.cpm || 0)),
+      conversions: tiktokConversions,
+      revenue: tiktokRevenue,
+      roas: tiktokSpend > 0 ? tiktokRevenue / tiktokSpend : 0,
+      conversion_rate: tiktokClicks > 0 ? (tiktokConversions / tiktokClicks) * 100 : 0,
       color: '#010101',
     },
     {
       name: 'Google',
-      spend: data.google.reduce((s, d) => s + (d.spend || 0), 0),
+      spend: googleSpend,
       impressions: data.google.reduce((s, d) => s + (d.impressions || 0), 0),
       ctr: avg(data.google.map((d) => d.ctr || 0)),
       cpc: avg(data.google.map((d) => d.cpc || 0)),
-      conversions: data.google.reduce((s, d) => s + (d.conversions || 0), 0),
+      cpm: avg(data.google.map((d) => d.cpm || 0)),
+      conversions: googleConversions,
+      revenue: googleRevenue,
+      roas: googleSpend > 0 ? googleRevenue / googleSpend : 0,
+      conversion_rate: googleClicks > 0 ? (googleConversions / googleClicks) * 100 : 0,
       color: '#4285F4',
     },
   ];

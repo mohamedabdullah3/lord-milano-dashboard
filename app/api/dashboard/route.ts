@@ -15,7 +15,7 @@ const DAILY_FIELDS = {
   snapchat: 'date,spend,impressions,clicks,swipes,ctr,cpc,cpm,conversion_purchases,conversion_purchases_value,conversion_add_cart,total_reach,frequency',
   meta: 'date,spend,impressions,clicks,ctr,cpc,cpm,action_values_purchase,actions_purchase,reach',
   tiktok: 'date,spend,impressions,clicks,conversions,ctr,cpc,cpm,complete_payment_roas,reach',
-  google: 'date,spend,impressions,clicks,conversions,ctr,cpc,conversion_value',
+  google: 'date,spend,impressions,clicks,conversions,ctr,cpc,cpm,conversion_value',
 };
 
 // Campaigns — Snapchat فقط، بدون date عشان يجمع على مستوى الحملة

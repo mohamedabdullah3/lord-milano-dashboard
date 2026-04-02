@@ -49,6 +49,7 @@ export interface GoogleAdsData {
   conversions: number;
   ctr: number;
   cpc: number;
+  cpm: number;
   conversion_value: number;
 }
 
@@ -76,7 +77,11 @@ export interface PlatformSummary {
   impressions: number;
   ctr: number;
   cpc: number;
+  cpm: number;
   conversions: number;
+  revenue: number;
+  roas: number;
+  conversion_rate: number;
   color: string;
 }
 
