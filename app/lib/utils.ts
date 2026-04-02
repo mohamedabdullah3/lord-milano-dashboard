@@ -9,6 +9,13 @@ import {
   CampaignRow,
 } from '@/app/types/dashboard';
 
+// Snapchat بيرجع بالدولار — باقي المنصات بالريال
+const SNAP_USD_TO_SAR = 3.75;
+
+export function snapToSAR(v: number): number {
+  return v * SNAP_USD_TO_SAR;
+}
+
 export function formatCurrency(value: number): string {
   return `${value.toLocaleString('ar-SA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`;
 }
@@ -38,14 +45,15 @@ export function getRoasBg(roas: number): string {
 }
 
 export function computeKPIs(data: DashboardData): KPIData {
-  const snapSpend = data.snapchat.reduce((s, d) => s + (d.spend || 0), 0);
+  // Snapchat: USD → SAR | باقي المنصات: ريال مباشرة
+  const snapSpendSAR = data.snapchat.reduce((s, d) => s + snapToSAR(d.spend || 0), 0);
   const metaSpend = data.meta.reduce((s, d) => s + (d.spend || 0), 0);
   const tiktokSpend = data.tiktok.reduce((s, d) => s + (d.spend || 0), 0);
   const googleSpend = data.google.reduce((s, d) => s + (d.spend || 0), 0);
-  const totalSpend = snapSpend + metaSpend + tiktokSpend + googleSpend;
+  const totalSpend = snapSpendSAR + metaSpend + tiktokSpend + googleSpend;
 
-  const snapchatRevenue = data.snapchat.reduce((s, d) => s + (d.conversion_purchases_value || 0), 0);
-  const snapchatROAS = snapSpend > 0 ? snapchatRevenue / snapSpend : 0;
+  const snapchatRevenue = data.snapchat.reduce((s, d) => s + snapToSAR(d.conversion_purchases_value || 0), 0);
+  const snapchatROAS = snapSpendSAR > 0 ? snapchatRevenue / snapSpendSAR : 0;
 
   const snapPurchases = data.snapchat.reduce((s, d) => s + (d.conversion_purchases || 0), 0);
   const tiktokConversions = data.tiktok.reduce((s, d) => s + (d.conversions || 0), 0);
@@ -72,10 +80,10 @@ export function computePlatformSummaries(data: DashboardData): PlatformSummary[]
   return [
     {
       name: 'Snapchat',
-      spend: data.snapchat.reduce((s, d) => s + (d.spend || 0), 0),
+      spend: data.snapchat.reduce((s, d) => s + snapToSAR(d.spend || 0), 0),
       impressions: data.snapchat.reduce((s, d) => s + (d.impressions || 0), 0),
       ctr: avg(data.snapchat.map((d) => d.ctr || 0)),
-      cpc: avg(data.snapchat.map((d) => d.cpc || 0)),
+      cpc: avg(data.snapchat.map((d) => snapToSAR(d.cpc || 0))),
       conversions: data.snapchat.reduce((s, d) => s + (d.conversion_purchases || 0), 0),
       color: '#FFFC00',
     },
@@ -121,7 +129,8 @@ export function aggregateDailySpend(data: DashboardData) {
       ((entry as Record<string, number | string>)[platform] as number) + spend;
   };
 
-  data.snapchat.forEach((d) => addToMap(d.date, 'snapchat', d.spend || 0));
+  // Snapchat: تحويل لريال، باقي المنصات: ريال مباشرة
+  data.snapchat.forEach((d) => addToMap(d.date, 'snapchat', snapToSAR(d.spend || 0)));
   data.meta.forEach((d) => addToMap(d.date, 'meta', d.spend || 0));
   data.tiktok.forEach((d) => addToMap(d.date, 'tiktok', d.spend || 0));
   data.google.forEach((d) => addToMap(d.date, 'google', d.spend || 0));
@@ -137,8 +146,8 @@ export function aggregateSnapchatRevenueVsSpend(data: SnapchatData[]) {
       map.set(d.date, { date: d.date, spend: 0, revenue: 0 });
     }
     const entry = map.get(d.date)!;
-    entry.spend += d.spend || 0;
-    entry.revenue += d.conversion_purchases_value || 0;
+    entry.spend += snapToSAR(d.spend || 0);
+    entry.revenue += snapToSAR(d.conversion_purchases_value || 0);
   });
 
   return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
@@ -191,14 +200,14 @@ export function aggregateCampaigns(data: SnapchatData[]): CampaignRow[] {
       map.set(key, { spend: 0, impressions: 0, clicks: 0, ctr: [], cpc: [], frequency: [], purchases: 0, revenue: 0 });
     }
     const entry = map.get(key)!;
-    entry.spend += d.spend || 0;
+    entry.spend += snapToSAR(d.spend || 0);
     entry.impressions += d.impressions || 0;
     entry.clicks += d.clicks || 0;
     if (d.ctr) entry.ctr.push(d.ctr);
-    if (d.cpc) entry.cpc.push(d.cpc);
+    if (d.cpc) entry.cpc.push(snapToSAR(d.cpc));
     if (d.frequency) entry.frequency.push(d.frequency);
     entry.purchases += d.conversion_purchases || 0;
-    entry.revenue += d.conversion_purchases_value || 0;
+    entry.revenue += snapToSAR(d.conversion_purchases_value || 0);
   });
 
   const avg = (arr: number[]) => (arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
@@ -228,7 +237,8 @@ export function computeInsights(data: DashboardData) {
 
   const highFreqCampaigns = campaigns.filter((c) => c.frequency > 5);
 
-  const snapCPC = data.snapchat.reduce((s, d) => s + (d.cpc || 0), 0) / (data.snapchat.filter((d) => d.cpc).length || 1);
+  // Snapchat CPC: بالريال بعد التحويل | باقي المنصات: ريال مباشرة
+  const snapCPC = data.snapchat.reduce((s, d) => s + snapToSAR(d.cpc || 0), 0) / (data.snapchat.filter((d) => d.cpc).length || 1);
   const metaCPC = data.meta.reduce((s, d) => s + (d.cpc || 0), 0) / (data.meta.filter((d) => d.cpc).length || 1);
   const tiktokCPC = data.tiktok.reduce((s, d) => s + (d.cpc || 0), 0) / (data.tiktok.filter((d) => d.cpc).length || 1);
   const googleCPC = data.google.reduce((s, d) => s + (d.cpc || 0), 0) / (data.google.filter((d) => d.cpc).length || 1);
