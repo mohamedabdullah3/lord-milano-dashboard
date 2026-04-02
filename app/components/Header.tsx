@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { DateRange, CustomDateRange } from '@/app/types/dashboard';
 
 interface HeaderProps {
@@ -9,22 +9,32 @@ interface HeaderProps {
   lastUpdated: string | null;
   onRefresh: () => void;
   isLoading: boolean;
+  nextRefresh: Date | null;
 }
 
 const RANGES: { label: string; value: DateRange }[] = [
-  { label: 'آخر 7 أيام', value: 'last_7d' },
-  { label: 'آخر 14 يوم', value: 'last_14d' },
-  { label: 'آخر 30 يوم', value: 'last_30d' },
+  { label: 'اليوم', value: 'today' },
+  { label: 'أمس', value: 'yesterday' },
+  { label: '7 أيام', value: 'last_7d' },
+  { label: '14 يوم', value: 'last_14d' },
+  { label: '30 يوم', value: 'last_30d' },
   { label: 'مخصص', value: 'custom' },
 ];
 
-export default function Header({ dateRange, onDateRangeChange, lastUpdated, onRefresh, isLoading }: HeaderProps) {
+export default function Header({ dateRange, onDateRangeChange, lastUpdated, onRefresh, isLoading, nextRefresh }: HeaderProps) {
   const today = new Date().toISOString().split('T')[0];
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
   const [showCustom, setShowCustom] = useState(false);
   const [fromDate, setFromDate] = useState(thirtyDaysAgo);
   const [toDate, setToDate] = useState(today);
+  const [, setTick] = useState(0);
+
+  // tick every 30 seconds to refresh elapsed / countdown display
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, []);
 
   const formattedDate = lastUpdated
     ? new Date(lastUpdated).toLocaleString('ar-SA', {
@@ -35,6 +45,22 @@ export default function Header({ dateRange, onDateRangeChange, lastUpdated, onRe
         minute: '2-digit',
       })
     : '—';
+
+  function elapsedLabel(): string {
+    if (!lastUpdated) return '';
+    const secs = Math.floor((Date.now() - new Date(lastUpdated).getTime()) / 1000);
+    if (secs < 60) return 'منذ أقل من دقيقة';
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `منذ ${mins} دقيقة`;
+    return `منذ ${Math.floor(mins / 60)} ساعة`;
+  }
+
+  function countdownLabel(): string {
+    if (!nextRefresh) return '';
+    const mins = Math.max(0, Math.ceil((nextRefresh.getTime() - Date.now()) / 60_000));
+    if (mins <= 1) return 'التحديث التالي: الآن';
+    return `التحديث التالي: ${mins} دقيقة`;
+  }
 
   function handleRangeClick(value: DateRange) {
     if (value === 'custom') {
@@ -61,7 +87,15 @@ export default function Header({ dateRange, onDateRangeChange, lastUpdated, onRe
               Lord Milano — Performance Hub
             </h1>
             {lastUpdated && (
-              <p className="text-xs text-gray-400 mt-0.5">آخر تحديث: {formattedDate}</p>
+              <div className="flex items-center gap-3 mt-0.5">
+                <p className="text-xs text-gray-400">آخر تحديث: {formattedDate} · {elapsedLabel()}</p>
+                {nextRefresh && (
+                  <span className="flex items-center gap-1 text-xs text-green-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                    {countdownLabel()}
+                  </span>
+                )}
+              </div>
             )}
           </div>
 

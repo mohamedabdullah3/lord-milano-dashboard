@@ -19,10 +19,10 @@ import {
 import { computeKPIs, computePlatformSummaries } from '@/app/lib/utils';
 import { DashboardData, DateRange, CustomDateRange } from '@/app/types/dashboard';
 
-const AUTO_REFRESH_MS = 3 * 60 * 60 * 1000; // 3 ساعات
+const AUTO_REFRESH_MS = 5 * 60 * 1000; // 5 دقائق — أسرع تحديث ممكن بدون الضغط على API
 
 export default function DashboardPage() {
-  const [dateRange, setDateRange] = useState<DateRange>('last_30d');
+  const [dateRange, setDateRange] = useState<DateRange>('today');
   const [customDates, setCustomDates] = useState<CustomDateRange | null>(null);
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -86,6 +86,7 @@ export default function DashboardPage() {
         lastUpdated={data?.lastUpdated ?? null}
         onRefresh={handleRefresh}
         isLoading={isLoading}
+        nextRefresh={nextRefresh}
       />
 
       <main className="max-w-[1600px] mx-auto px-4 sm:px-6 py-6 space-y-8">
@@ -198,7 +199,7 @@ export default function DashboardPage() {
       </main>
 
       <footer className="border-t border-gray-800 mt-12 py-6 text-center text-gray-600 text-xs">
-        Lord Milano — Performance Hub &copy; {new Date().getFullYear()} &bull; يتجدد تلقائياً كل 3 ساعات
+        Lord Milano — Performance Hub &copy; {new Date().getFullYear()} &bull; يتجدد تلقائياً كل 5 دقائق
       </footer>
     </div>
   );
