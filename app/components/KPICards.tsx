@@ -5,16 +5,22 @@ import { formatCurrency, formatNumber, formatROAS } from '@/app/lib/utils';
 
 interface KPICardProps {
   label: string;
+  sublabel?: string;
   value: string;
   icon: string;
   accent?: string;
 }
 
-function KPICard({ label, value, icon, accent = 'text-blue-400' }: KPICardProps) {
+function KPICard({ label, sublabel, value, icon, accent = 'text-blue-400' }: KPICardProps) {
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <span className="text-gray-400 text-xs font-medium">{label}</span>
+        <div>
+          <span className="text-gray-400 text-xs font-medium">{label}</span>
+          {sublabel && (
+            <p className="text-gray-600 text-xs mt-0.5">{sublabel}</p>
+          )}
+        </div>
         <span className="text-lg">{icon}</span>
       </div>
       <p className={`text-lg sm:text-xl font-bold ${accent} leading-tight`}>{value}</p>
@@ -38,36 +44,42 @@ export default function KPICards({ kpis }: KPICardsProps) {
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
       <KPICard
         label="إجمالي الإنفاق"
+        sublabel="كل المنصات"
         value={formatCurrency(kpis.totalSpend)}
         icon="💸"
         accent="text-orange-400"
       />
       <KPICard
-        label="إيرادات Snapchat"
+        label="إيرادات المبيعات"
+        sublabel="Snapchat فقط"
         value={formatCurrency(kpis.snapchatRevenue)}
         icon="💰"
         accent="text-yellow-400"
       />
       <KPICard
-        label="Snapchat ROAS"
+        label="ROAS"
+        sublabel="Snapchat فقط"
         value={formatROAS(kpis.snapchatROAS)}
         icon="📈"
         accent={roasColor}
       />
       <KPICard
-        label="إجمالي المبيعات"
+        label="إجمالي التحويلات"
+        sublabel="Snap + TikTok + Google"
         value={formatNumber(kpis.totalPurchases)}
         icon="🛒"
         accent="text-green-400"
       />
       <KPICard
         label="إجمالي الانطباعات"
+        sublabel="كل المنصات"
         value={formatNumber(kpis.totalImpressions)}
         icon="👁️"
         accent="text-blue-400"
       />
       <KPICard
         label="إجمالي الوصول"
+        sublabel="Snapchat فقط"
         value={formatNumber(kpis.totalReach)}
         icon="🎯"
         accent="text-purple-400"
