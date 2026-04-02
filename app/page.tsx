@@ -134,7 +134,7 @@ export default function DashboardPage() {
               {isLoading || !data ? (
                 <TableSkeleton />
               ) : (
-                <CampaignsTable data={data.snapchatCampaigns} />
+                <CampaignsTable data={data} />
               )}
             </section>
           </>

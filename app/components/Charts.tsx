@@ -20,8 +20,8 @@ import type { ValueType, NameType } from 'recharts/types/component/DefaultToolti
 import { DashboardData } from '@/app/types/dashboard';
 import {
   aggregateDailySpend,
-  aggregateSnapchatRevenueVsSpend,
-  aggregateSnapchatROAS,
+  aggregateAllPlatformsRevenueVsSpend,
+  aggregateAllPlatformsROAS,
   aggregateCTRTrend,
   computePlatformSummaries,
 } from '@/app/lib/utils';
@@ -67,7 +67,6 @@ function fmtCTR(v: unknown): string {
 
 type CustomTooltipProps = TooltipContentProps<ValueType, NameType>;
 
-// Generic custom tooltip to avoid recharts Formatter type issues
 function CurrencyTooltip({ active, payload, label }: CustomTooltipProps) {
   if (!active || !payload?.length) return null;
   return (
@@ -87,7 +86,13 @@ function ROASTooltip({ active, payload, label }: CustomTooltipProps) {
   return (
     <div style={CONTENT_STYLE} className="px-3 py-2 text-sm">
       <p style={LABEL_STYLE} className="mb-1">{shortDate(label)}</p>
-      <p style={{ color: '#fff' }}>ROAS: {fmtROAS(payload[0]?.value)}</p>
+      {payload.map((entry) =>
+        entry.value != null ? (
+          <p key={String(entry.dataKey)} style={{ color: entry.color }}>
+            {entry.name}: {fmtROAS(entry.value)}
+          </p>
+        ) : null
+      )}
     </div>
   );
 }
@@ -121,8 +126,8 @@ interface ChartsProps {
 
 export default function Charts({ data }: ChartsProps) {
   const dailySpend = aggregateDailySpend(data);
-  const revenueVsSpend = aggregateSnapchatRevenueVsSpend(data.snapchat);
-  const roasDaily = aggregateSnapchatROAS(data.snapchat);
+  const allRevenueVsSpend = aggregateAllPlatformsRevenueVsSpend(data);
+  const allROAS = aggregateAllPlatformsROAS(data);
   const ctrTrend = aggregateCTRTrend(data);
   const platforms = computePlatformSummaries(data);
   const donutData = platforms
@@ -131,7 +136,7 @@ export default function Charts({ data }: ChartsProps) {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      {/* Chart 1: Daily Spend */}
+      {/* Chart 1: Daily Spend — كل المنصات */}
       <ChartCard title="الإنفاق اليومي — كل المنصات">
         <ResponsiveContainer width="100%" height={280}>
           <LineChart data={dailySpend} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
@@ -148,38 +153,35 @@ export default function Charts({ data }: ChartsProps) {
         </ResponsiveContainer>
       </ChartCard>
 
-      {/* Chart 2: Snapchat Revenue vs Spend */}
-      <ChartCard title="Snapchat — الإيرادات مقابل الإنفاق اليومي">
+      {/* Chart 2: All Platforms Revenue vs Spend */}
+      <ChartCard title="الإيرادات مقابل الإنفاق — كل المنصات">
         <ResponsiveContainer width="100%" height={280}>
-          <BarChart data={revenueVsSpend} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+          <BarChart data={allRevenueVsSpend} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
             <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fill: '#9ca3af', fontSize: 11 }} />
             <YAxis tick={{ fill: '#9ca3af', fontSize: 11 }} width={50} />
             <Tooltip content={(p) => <CurrencyTooltip {...(p as CustomTooltipProps)} />} />
             <Legend wrapperStyle={{ color: '#9ca3af', fontSize: 12 }} />
-            <Bar dataKey="spend" fill="#FFFC00" name="الإنفاق" radius={[2, 2, 0, 0]} />
+            <Bar dataKey="spend" fill="#60a5fa" name="الإنفاق" radius={[2, 2, 0, 0]} />
             <Bar dataKey="revenue" fill="#22c55e" name="الإيرادات" radius={[2, 2, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>
 
-      {/* Chart 3: Snapchat ROAS Daily */}
-      <ChartCard title="Snapchat ROAS اليومي">
+      {/* Chart 3: All Platforms ROAS Daily */}
+      <ChartCard title="ROAS اليومي — كل المنصات">
         <ResponsiveContainer width="100%" height={280}>
-          <BarChart data={roasDaily} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+          <LineChart data={allROAS} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
             <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fill: '#9ca3af', fontSize: 11 }} />
             <YAxis tick={{ fill: '#9ca3af', fontSize: 11 }} width={40} />
             <Tooltip content={(p) => <ROASTooltip {...(p as CustomTooltipProps)} />} />
-            <Bar dataKey="roas" name="ROAS" radius={[2, 2, 0, 0]}>
-              {roasDaily.map((entry, index) => (
-                <Cell
-                  key={`cell-${index}`}
-                  fill={entry.roas >= 3 ? '#22c55e' : entry.roas >= 2 ? '#f59e0b' : '#ef4444'}
-                />
-              ))}
-            </Bar>
-          </BarChart>
+            <Legend wrapperStyle={{ color: '#9ca3af', fontSize: 12 }} />
+            <Line type="monotone" dataKey="snapchat" stroke="#FFFC00" strokeWidth={2} dot={false} name="Snapchat" connectNulls />
+            <Line type="monotone" dataKey="meta" stroke="#1877F2" strokeWidth={2} dot={false} name="Meta" connectNulls />
+            <Line type="monotone" dataKey="tiktok" stroke="#ff6b6b" strokeWidth={2} dot={false} name="TikTok" connectNulls />
+            <Line type="monotone" dataKey="google" stroke="#4285F4" strokeWidth={2} dot={false} name="Google" connectNulls />
+          </LineChart>
         </ResponsiveContainer>
         <div className="flex gap-4 mt-2 justify-center">
           <span className="flex items-center gap-1 text-xs text-gray-400">
@@ -221,9 +223,9 @@ export default function Charts({ data }: ChartsProps) {
         </ResponsiveContainer>
       </ChartCard>
 
-      {/* Chart 5: CTR Trend */}
+      {/* Chart 5: CTR Trend — كل المنصات */}
       <div className="lg:col-span-2">
-        <ChartCard title="مقارنة CTR اليومي — Snapchat vs TikTok">
+        <ChartCard title="مقارنة CTR اليومي — كل المنصات">
           <ResponsiveContainer width="100%" height={250}>
             <LineChart data={ctrTrend} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
@@ -232,7 +234,9 @@ export default function Charts({ data }: ChartsProps) {
               <Tooltip content={(p) => <CTRTooltip {...(p as CustomTooltipProps)} />} />
               <Legend wrapperStyle={{ color: '#9ca3af', fontSize: 12 }} />
               <Line type="monotone" dataKey="snapchat" stroke="#FFFC00" strokeWidth={2} dot={false} name="Snapchat CTR" />
+              <Line type="monotone" dataKey="meta" stroke="#1877F2" strokeWidth={2} dot={false} name="Meta CTR" />
               <Line type="monotone" dataKey="tiktok" stroke="#ff6b6b" strokeWidth={2} dot={false} name="TikTok CTR" />
+              <Line type="monotone" dataKey="google" stroke="#4285F4" strokeWidth={2} dot={false} name="Google CTR" />
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>

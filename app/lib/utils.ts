@@ -214,28 +214,140 @@ export function aggregateSnapchatROAS(data: SnapchatData[]) {
 export function aggregateCTRTrend(data: DashboardData) {
   const snapMap = new Map<string, number[]>();
   const tiktokMap = new Map<string, number[]>();
+  const metaMap = new Map<string, number[]>();
+  const googleMap = new Map<string, number[]>();
 
-  data.snapchat.forEach((d) => {
-    if (!snapMap.has(d.date)) snapMap.set(d.date, []);
-    if (d.ctr) snapMap.get(d.date)!.push(d.ctr);
-  });
-  data.tiktok.forEach((d) => {
-    if (!tiktokMap.has(d.date)) tiktokMap.set(d.date, []);
-    if (d.ctr) tiktokMap.get(d.date)!.push(d.ctr);
-  });
+  const push = (map: Map<string, number[]>, date: string, val: number) => {
+    if (!map.has(date)) map.set(date, []);
+    if (val) map.get(date)!.push(val);
+  };
 
-  const dates = new Set([...snapMap.keys(), ...tiktokMap.keys()]);
+  data.snapchat.forEach((d) => push(snapMap, d.date, d.ctr));
+  data.tiktok.forEach((d) => push(tiktokMap, d.date, d.ctr));
+  data.meta.forEach((d) => push(metaMap, d.date, d.ctr));
+  data.google.forEach((d) => push(googleMap, d.date, d.ctr));
+
+  const avgArr = (arr: number[]) => arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+
+  const dates = new Set([...snapMap.keys(), ...tiktokMap.keys(), ...metaMap.keys(), ...googleMap.keys()]);
   return Array.from(dates)
     .sort()
-    .map((date) => {
-      const sArr = snapMap.get(date) || [];
-      const tArr = tiktokMap.get(date) || [];
-      return {
-        date,
-        snapchat: sArr.length > 0 ? sArr.reduce((a, b) => a + b, 0) / sArr.length : 0,
-        tiktok: tArr.length > 0 ? tArr.reduce((a, b) => a + b, 0) / tArr.length : 0,
-      };
-    });
+    .map((date) => ({
+      date,
+      snapchat: avgArr(snapMap.get(date) || []),
+      tiktok: avgArr(tiktokMap.get(date) || []),
+      meta: avgArr(metaMap.get(date) || []),
+      google: avgArr(googleMap.get(date) || []),
+    }));
+}
+
+export function aggregateAllPlatformsRevenueVsSpend(data: DashboardData) {
+  const map = new Map<string, { date: string; spend: number; revenue: number }>();
+
+  const add = (date: string, spend: number, revenue: number) => {
+    if (!map.has(date)) map.set(date, { date, spend: 0, revenue: 0 });
+    const e = map.get(date)!;
+    e.spend += spend;
+    e.revenue += revenue;
+  };
+
+  data.snapchat.forEach((d) => add(d.date, snapToSAR(d.spend || 0), snapToSAR(d.conversion_purchases_value || 0)));
+  data.meta.forEach((d) => add(d.date, d.spend || 0, d.action_values_purchase || 0));
+  data.tiktok.forEach((d) => add(d.date, d.spend || 0, (d.complete_payment_roas || 0) * (d.spend || 0)));
+  data.google.forEach((d) => add(d.date, d.spend || 0, d.conversion_value || 0));
+
+  return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export function aggregateAllPlatformsROAS(data: DashboardData) {
+  type PlatformDaily = { spend: number; revenue: number };
+  const snap = new Map<string, PlatformDaily>();
+  const meta = new Map<string, PlatformDaily>();
+  const tiktok = new Map<string, PlatformDaily>();
+  const google = new Map<string, PlatformDaily>();
+
+  const add = (map: Map<string, PlatformDaily>, date: string, spend: number, revenue: number) => {
+    if (!map.has(date)) map.set(date, { spend: 0, revenue: 0 });
+    const e = map.get(date)!;
+    e.spend += spend;
+    e.revenue += revenue;
+  };
+
+  data.snapchat.forEach((d) => add(snap, d.date, snapToSAR(d.spend || 0), snapToSAR(d.conversion_purchases_value || 0)));
+  data.meta.forEach((d) => add(meta, d.date, d.spend || 0, d.action_values_purchase || 0));
+  data.tiktok.forEach((d) => add(tiktok, d.date, d.spend || 0, (d.complete_payment_roas || 0) * (d.spend || 0)));
+  data.google.forEach((d) => add(google, d.date, d.spend || 0, d.conversion_value || 0));
+
+  const roas = (m: Map<string, PlatformDaily>, date: string) => {
+    const e = m.get(date);
+    return e && e.spend > 0 ? e.revenue / e.spend : null;
+  };
+
+  const dates = new Set([...snap.keys(), ...meta.keys(), ...tiktok.keys(), ...google.keys()]);
+  return Array.from(dates).sort().map((date) => ({
+    date,
+    snapchat: roas(snap, date),
+    meta: roas(meta, date),
+    tiktok: roas(tiktok, date),
+    google: roas(google, date),
+  }));
+}
+
+export function aggregateMetaCampaigns(data: MetaData[]): CampaignRow[] {
+  return data.map((d) => {
+    const spend = d.spend || 0;
+    const revenue = d.action_values_purchase || 0;
+    const purchases = d.actions_purchase || 0;
+    return {
+      campaign: d.campaign_name || 'Unknown',
+      spend,
+      impressions: d.impressions || 0,
+      ctr: d.ctr || 0,
+      cpc: d.cpc || 0,
+      frequency: 0,
+      purchases,
+      revenue,
+      roas: spend > 0 ? revenue / spend : 0,
+    };
+  });
+}
+
+export function aggregateTikTokCampaigns(data: TikTokData[]): CampaignRow[] {
+  return data.map((d) => {
+    const spend = d.spend || 0;
+    const revenue = (d.complete_payment_roas || 0) * spend;
+    const purchases = d.conversions || 0;
+    return {
+      campaign: d.campaign_name || 'Unknown',
+      spend,
+      impressions: d.impressions || 0,
+      ctr: d.ctr || 0,
+      cpc: d.cpc || 0,
+      frequency: 0,
+      purchases,
+      revenue,
+      roas: spend > 0 ? revenue / spend : 0,
+    };
+  });
+}
+
+export function aggregateGoogleCampaigns(data: GoogleAdsData[]): CampaignRow[] {
+  return data.map((d) => {
+    const spend = d.spend || 0;
+    const revenue = d.conversion_value || 0;
+    const purchases = d.conversions || 0;
+    return {
+      campaign: d.campaign_name || 'Unknown',
+      spend,
+      impressions: d.impressions || 0,
+      ctr: d.ctr || 0,
+      cpc: d.cpc || 0,
+      frequency: 0,
+      purchases,
+      revenue,
+      roas: spend > 0 ? revenue / spend : 0,
+    };
+  });
 }
 
 // snapchatCampaigns: بيانات مجمّعة على مستوى الحملة بدون date dimension

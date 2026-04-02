@@ -26,6 +26,7 @@ export interface MetaData {
   action_values_purchase: number;
   actions_purchase: number;
   reach: number;
+  campaign_name?: string;
 }
 
 export interface TikTokData {
@@ -39,6 +40,7 @@ export interface TikTokData {
   cpm: number;
   complete_payment_roas: number;
   reach: number;
+  campaign_name?: string;
 }
 
 export interface GoogleAdsData {
@@ -51,6 +53,7 @@ export interface GoogleAdsData {
   cpc: number;
   cpm: number;
   conversion_value: number;
+  campaign_name?: string;
 }
 
 export interface DashboardData {
@@ -59,6 +62,9 @@ export interface DashboardData {
   tiktok: TikTokData[];
   google: GoogleAdsData[];
   snapchatCampaigns: SnapchatData[];
+  metaCampaigns: MetaData[];
+  tiktokCampaigns: TikTokData[];
+  googleCampaigns: GoogleAdsData[];
   lastUpdated: string;
 }
 
