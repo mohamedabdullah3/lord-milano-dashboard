@@ -85,4 +85,9 @@ export interface CampaignRow {
   roas: number;
 }
 
-export type DateRange = 'last_7d' | 'last_14d' | 'last_30d';
+export type DateRange = 'last_7d' | 'last_14d' | 'last_30d' | 'custom';
+
+export interface CustomDateRange {
+  from: string;
+  to: string;
+}

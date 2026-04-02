@@ -26,10 +26,22 @@ function getDatePreset(range: string): string {
   }
 }
 
-async function fetchConnectorData(connector: string, accountId: string, fields: string, datePreset: string) {
+async function fetchConnectorData(
+  connector: string,
+  accountId: string,
+  fields: string,
+  datePreset: string,
+  dateFrom?: string,
+  dateTo?: string,
+) {
   const url = new URL(`${WINDSOR_BASE}/${connector}`);
   url.searchParams.set('api_key', API_KEY || '');
-  url.searchParams.set('date_preset', datePreset);
+  if (dateFrom && dateTo) {
+    url.searchParams.set('date_from', dateFrom);
+    url.searchParams.set('date_to', dateTo);
+  } else {
+    url.searchParams.set('date_preset', datePreset);
+  }
   url.searchParams.set('fields', fields);
   url.searchParams.set('account_id', accountId);
 
@@ -49,14 +61,16 @@ async function fetchConnectorData(connector: string, accountId: string, fields: 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const range = searchParams.get('range') || 'last_30d';
+  const dateFrom = searchParams.get('date_from') || undefined;
+  const dateTo = searchParams.get('date_to') || undefined;
   const datePreset = getDatePreset(range);
 
   try {
     const [snapchat, meta, tiktok, google] = await Promise.allSettled([
-      fetchConnectorData(ACCOUNTS.snapchat.connector, ACCOUNTS.snapchat.id, FIELDS.snapchat, datePreset),
-      fetchConnectorData(ACCOUNTS.meta.connector, ACCOUNTS.meta.id, FIELDS.meta, datePreset),
-      fetchConnectorData(ACCOUNTS.tiktok.connector, ACCOUNTS.tiktok.id, FIELDS.tiktok, datePreset),
-      fetchConnectorData(ACCOUNTS.google.connector, ACCOUNTS.google.id, FIELDS.google, datePreset),
+      fetchConnectorData(ACCOUNTS.snapchat.connector, ACCOUNTS.snapchat.id, FIELDS.snapchat, datePreset, dateFrom, dateTo),
+      fetchConnectorData(ACCOUNTS.meta.connector, ACCOUNTS.meta.id, FIELDS.meta, datePreset, dateFrom, dateTo),
+      fetchConnectorData(ACCOUNTS.tiktok.connector, ACCOUNTS.tiktok.id, FIELDS.tiktok, datePreset, dateFrom, dateTo),
+      fetchConnectorData(ACCOUNTS.google.connector, ACCOUNTS.google.id, FIELDS.google, datePreset, dateFrom, dateTo),
     ]);
 
     return NextResponse.json({

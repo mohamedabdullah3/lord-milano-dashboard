@@ -15,19 +15,24 @@ import {
   TableSkeleton,
 } from '@/app/components/LoadingSkeleton';
 import { computeKPIs, computePlatformSummaries } from '@/app/lib/utils';
-import { DashboardData, DateRange } from '@/app/types/dashboard';
+import { DashboardData, DateRange, CustomDateRange } from '@/app/types/dashboard';
 
 export default function DashboardPage() {
   const [dateRange, setDateRange] = useState<DateRange>('last_30d');
+  const [customDates, setCustomDates] = useState<CustomDateRange | null>(null);
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchData = useCallback(async (range: DateRange) => {
+  const fetchData = useCallback(async (range: DateRange, custom?: CustomDateRange) => {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/dashboard?range=${range}`, { cache: 'no-store' });
+      let url = `/api/dashboard?range=${range}`;
+      if (range === 'custom' && custom) {
+        url += `&date_from=${custom.from}&date_to=${custom.to}`;
+      }
+      const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
@@ -40,11 +45,14 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    fetchData(dateRange);
-  }, [dateRange, fetchData]);
+    fetchData(dateRange, customDates ?? undefined);
+  }, [dateRange, customDates, fetchData]);
 
-  const handleRefresh = () => fetchData(dateRange);
-  const handleDateRangeChange = (range: DateRange) => setDateRange(range);
+  const handleRefresh = () => fetchData(dateRange, customDates ?? undefined);
+  const handleDateRangeChange = (range: DateRange, custom?: CustomDateRange) => {
+    setDateRange(range);
+    setCustomDates(custom ?? null);
+  };
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">

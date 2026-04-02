@@ -1,10 +1,11 @@
 'use client';
 
-import { DateRange } from '@/app/types/dashboard';
+import { useState } from 'react';
+import { DateRange, CustomDateRange } from '@/app/types/dashboard';
 
 interface HeaderProps {
   dateRange: DateRange;
-  onDateRangeChange: (range: DateRange) => void;
+  onDateRangeChange: (range: DateRange, custom?: CustomDateRange) => void;
   lastUpdated: string | null;
   onRefresh: () => void;
   isLoading: boolean;
@@ -14,9 +15,17 @@ const RANGES: { label: string; value: DateRange }[] = [
   { label: 'آخر 7 أيام', value: 'last_7d' },
   { label: 'آخر 14 يوم', value: 'last_14d' },
   { label: 'آخر 30 يوم', value: 'last_30d' },
+  { label: 'مخصص', value: 'custom' },
 ];
 
 export default function Header({ dateRange, onDateRangeChange, lastUpdated, onRefresh, isLoading }: HeaderProps) {
+  const today = new Date().toISOString().split('T')[0];
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+  const [showCustom, setShowCustom] = useState(false);
+  const [fromDate, setFromDate] = useState(thirtyDaysAgo);
+  const [toDate, setToDate] = useState(today);
+
   const formattedDate = lastUpdated
     ? new Date(lastUpdated).toLocaleString('ar-SA', {
         year: 'numeric',
@@ -26,6 +35,21 @@ export default function Header({ dateRange, onDateRangeChange, lastUpdated, onRe
         minute: '2-digit',
       })
     : '—';
+
+  function handleRangeClick(value: DateRange) {
+    if (value === 'custom') {
+      setShowCustom(true);
+    } else {
+      setShowCustom(false);
+      onDateRangeChange(value);
+    }
+  }
+
+  function handleApplyCustom() {
+    if (!fromDate || !toDate) return;
+    onDateRangeChange('custom', { from: fromDate, to: toDate });
+    setShowCustom(false);
+  }
 
   return (
     <header className="bg-gray-900 border-b border-gray-800 sticky top-0 z-50">
@@ -43,12 +67,12 @@ export default function Header({ dateRange, onDateRangeChange, lastUpdated, onRe
 
           {/* Controls */}
           <div className="flex flex-wrap items-center gap-2">
-            {/* Date Range Picker */}
+            {/* Date Range Buttons */}
             <div className="flex bg-gray-800 rounded-lg p-1 gap-1">
               {RANGES.map((r) => (
                 <button
                   key={r.value}
-                  onClick={() => onDateRangeChange(r.value)}
+                  onClick={() => handleRangeClick(r.value)}
                   className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                     dateRange === r.value
                       ? 'bg-blue-600 text-white'
@@ -83,6 +107,46 @@ export default function Header({ dateRange, onDateRangeChange, lastUpdated, onRe
             </button>
           </div>
         </div>
+
+        {/* Custom Date Range Panel */}
+        {showCustom && (
+          <div className="mt-3 flex flex-wrap items-end gap-3 p-3 bg-gray-800 rounded-xl border border-gray-700">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-gray-400">من</label>
+              <input
+                type="date"
+                value={fromDate}
+                max={toDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                className="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-gray-400">إلى</label>
+              <input
+                type="date"
+                value={toDate}
+                min={fromDate}
+                max={today}
+                onChange={(e) => setToDate(e.target.value)}
+                className="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <button
+              onClick={handleApplyCustom}
+              disabled={!fromDate || !toDate}
+              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              تطبيق
+            </button>
+            <button
+              onClick={() => setShowCustom(false)}
+              className="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm rounded-lg transition-colors"
+            >
+              إلغاء
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );
