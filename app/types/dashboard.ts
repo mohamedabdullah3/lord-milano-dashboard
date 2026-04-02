@@ -56,6 +56,66 @@ export interface GoogleAdsData {
   campaign_name?: string;
 }
 
+export interface SnapchatAdRaw {
+  ad_name: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  cpc: number;
+  cpm: number;
+  conversion_purchases: number;
+  conversion_purchases_value: number;
+}
+
+export interface MetaAdRaw {
+  ad_name: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  cpc: number;
+  cpm: number;
+  action_values_purchase: number;
+  actions_purchase: number;
+}
+
+export interface TikTokAdRaw {
+  ad_name: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  conversions: number;
+  ctr: number;
+  cpc: number;
+  cpm: number;
+  complete_payment_roas: number;
+}
+
+export interface GoogleAdRaw {
+  ad_name: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  conversions: number;
+  ctr: number;
+  cpc: number;
+  cpm: number;
+  conversion_value: number;
+}
+
+export interface AdRow {
+  ad: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  cpc: number;
+  conversions: number;
+  revenue: number;
+  roas: number;
+}
+
 export interface DashboardData {
   snapchat: SnapchatData[];
   meta: MetaData[];
@@ -65,6 +125,10 @@ export interface DashboardData {
   metaCampaigns: MetaData[];
   tiktokCampaigns: TikTokData[];
   googleCampaigns: GoogleAdsData[];
+  snapchatAds: SnapchatAdRaw[];
+  metaAds: MetaAdRaw[];
+  tiktokAds: TikTokAdRaw[];
+  googleAds: GoogleAdRaw[];
   lastUpdated: string;
 }
 

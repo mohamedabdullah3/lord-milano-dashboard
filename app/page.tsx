@@ -7,6 +7,7 @@ import PlatformCards from '@/app/components/PlatformCards';
 import Charts from '@/app/components/Charts';
 import CampaignsTable from '@/app/components/CampaignsTable';
 import InsightsSection from '@/app/components/InsightsSection';
+import AdsReviewSection from '@/app/components/AdsReviewSection';
 import ErrorState from '@/app/components/ErrorState';
 import {
   KPISkeleton,
@@ -123,6 +124,22 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 <InsightsSection data={data} />
+              )}
+            </section>
+
+            {/* Section: Ads Review */}
+            <section>
+              <h2 className="text-gray-400 text-sm font-medium uppercase tracking-wider mb-3">
+                مراجعة الإعلانات — Winner &amp; Weak Ads
+              </h2>
+              {isLoading || !data ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="bg-gray-800 rounded-xl p-5 animate-pulse h-48" />
+                  ))}
+                </div>
+              ) : (
+                <AdsReviewSection data={data} />
               )}
             </section>
 

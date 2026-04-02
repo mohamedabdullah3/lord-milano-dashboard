@@ -7,6 +7,11 @@ import {
   KPIData,
   PlatformSummary,
   CampaignRow,
+  AdRow,
+  SnapchatAdRaw,
+  MetaAdRaw,
+  TikTokAdRaw,
+  GoogleAdRaw,
 } from '@/app/types/dashboard';
 
 // Snapchat بيرجع بالدولار — باقي المنصات بالريال
@@ -395,4 +400,96 @@ export function computeInsights(data: DashboardData) {
   ].sort((a, b) => a.cpc - b.cpc);
 
   return { bestROASDay, topRevenueCampaign, highFreqCampaigns, cpcPlatforms };
+}
+
+// =================== Ads Aggregation ===================
+
+const MIN_SPEND_SAR = 50; // حد أدنى للإنفاق عشان نتجاهل الإعلانات غير النشطة
+
+export function aggregateSnapchatAds(data: SnapchatAdRaw[]): AdRow[] {
+  return data
+    .filter((d) => (d.spend || 0) > 0)
+    .map((d) => {
+      const spend = snapToSAR(d.spend || 0);
+      const revenue = snapToSAR(d.conversion_purchases_value || 0);
+      return {
+        ad: d.ad_name || 'Unknown',
+        spend,
+        impressions: d.impressions || 0,
+        clicks: d.clicks || 0,
+        ctr: d.ctr || 0,
+        cpc: snapToSAR(d.cpc || 0),
+        conversions: d.conversion_purchases || 0,
+        revenue,
+        roas: spend > 0 ? revenue / spend : 0,
+      };
+    });
+}
+
+export function aggregateMetaAds(data: MetaAdRaw[]): AdRow[] {
+  return data
+    .filter((d) => (d.spend || 0) > 0)
+    .map((d) => {
+      const spend = d.spend || 0;
+      const revenue = d.action_values_purchase || 0;
+      return {
+        ad: d.ad_name || 'Unknown',
+        spend,
+        impressions: d.impressions || 0,
+        clicks: d.clicks || 0,
+        ctr: d.ctr || 0,
+        cpc: d.cpc || 0,
+        conversions: d.actions_purchase || 0,
+        revenue,
+        roas: spend > 0 ? revenue / spend : 0,
+      };
+    });
+}
+
+export function aggregateTikTokAds(data: TikTokAdRaw[]): AdRow[] {
+  return data
+    .filter((d) => (d.spend || 0) > 0)
+    .map((d) => {
+      const spend = d.spend || 0;
+      const revenue = (d.complete_payment_roas || 0) * spend;
+      return {
+        ad: d.ad_name || 'Unknown',
+        spend,
+        impressions: d.impressions || 0,
+        clicks: d.clicks || 0,
+        ctr: d.ctr || 0,
+        cpc: d.cpc || 0,
+        conversions: d.conversions || 0,
+        revenue,
+        roas: spend > 0 ? revenue / spend : 0,
+      };
+    });
+}
+
+export function aggregateGoogleAds(data: GoogleAdRaw[]): AdRow[] {
+  return data
+    .filter((d) => (d.spend || 0) > 0)
+    .map((d) => {
+      const spend = d.spend || 0;
+      const revenue = d.conversion_value || 0;
+      return {
+        ad: d.ad_name || 'Unknown',
+        spend,
+        impressions: d.impressions || 0,
+        clicks: d.clicks || 0,
+        ctr: d.ctr || 0,
+        cpc: d.cpc || 0,
+        conversions: d.conversions || 0,
+        revenue,
+        roas: spend > 0 ? revenue / spend : 0,
+      };
+    });
+}
+
+export function classifyAds(ads: AdRow[], topN = 5): { winners: AdRow[]; weak: AdRow[] } {
+  const active = ads.filter((a) => a.spend >= MIN_SPEND_SAR);
+  const sorted = [...active].sort((a, b) => b.roas - a.roas);
+  const winners = sorted.slice(0, topN);
+  const weak = sorted.slice(-topN).reverse().filter((a) => !winners.includes(a));
+  return { winners, weak };
 }
