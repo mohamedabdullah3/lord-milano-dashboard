@@ -65,7 +65,7 @@ export default function KPICards({ kpis }: KPICardsProps) {
       />
       <KPICard
         label="إجمالي التحويلات"
-        sublabel="Snap + TikTok + Google"
+        sublabel="كل المنصات"
         value={formatNumber(kpis.totalPurchases)}
         icon="🛒"
         accent="text-green-400"

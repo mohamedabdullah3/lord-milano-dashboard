@@ -62,9 +62,10 @@ export function computeKPIs(data: DashboardData): KPIData {
   const totalROAS = totalSpend > 0 ? totalRevenue / totalSpend : 0;
 
   const snapPurchases = data.snapchat.reduce((s, d) => s + (d.conversion_purchases || 0), 0);
+  const metaConversions = data.meta.reduce((s, d) => s + (d.actions_purchase || 0), 0);
   const tiktokConversions = data.tiktok.reduce((s, d) => s + (d.conversions || 0), 0);
   const googleConversions = data.google.reduce((s, d) => s + (d.conversions || 0), 0);
-  const totalPurchases = snapPurchases + tiktokConversions + googleConversions;
+  const totalPurchases = snapPurchases + metaConversions + tiktokConversions + googleConversions;
 
   const totalImpressions =
     data.snapchat.reduce((s, d) => s + (d.impressions || 0), 0) +

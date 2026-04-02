@@ -24,6 +24,7 @@ export interface MetaData {
   cpc: number;
   cpm: number;
   action_values_purchase: number;
+  actions_purchase: number;
 }
 
 export interface TikTokData {
