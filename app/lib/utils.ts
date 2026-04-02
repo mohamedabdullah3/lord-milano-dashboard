@@ -55,8 +55,10 @@ export function computeKPIs(data: DashboardData): KPIData {
   // إيرادات كل المنصات
   const snapRevenue = data.snapchat.reduce((s, d) => s + snapToSAR(d.conversion_purchases_value || 0), 0);
   const metaRevenue = data.meta.reduce((s, d) => s + (d.action_values_purchase || 0), 0);
+  // TikTok: revenue = complete_payment_roas × spend (مفيش field مباشر للقيمة)
+  const tiktokRevenue = data.tiktok.reduce((s, d) => s + ((d.complete_payment_roas || 0) * (d.spend || 0)), 0);
   const googleRevenue = data.google.reduce((s, d) => s + (d.conversion_value || 0), 0);
-  const totalRevenue = snapRevenue + metaRevenue + googleRevenue;
+  const totalRevenue = snapRevenue + metaRevenue + tiktokRevenue + googleRevenue;
   const totalROAS = totalSpend > 0 ? totalRevenue / totalSpend : 0;
 
   const snapPurchases = data.snapchat.reduce((s, d) => s + (d.conversion_purchases || 0), 0);

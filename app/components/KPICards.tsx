@@ -51,7 +51,7 @@ export default function KPICards({ kpis }: KPICardsProps) {
       />
       <KPICard
         label="إجمالي الإيرادات"
-        sublabel="Snap + Meta + Google"
+        sublabel="كل المنصات"
         value={formatCurrency(kpis.totalRevenue)}
         icon="💰"
         accent="text-yellow-400"

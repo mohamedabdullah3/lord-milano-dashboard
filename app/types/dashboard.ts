@@ -35,6 +35,7 @@ export interface TikTokData {
   ctr: number;
   cpc: number;
   cpm: number;
+  complete_payment_roas: number;
 }
 
 export interface GoogleAdsData {
