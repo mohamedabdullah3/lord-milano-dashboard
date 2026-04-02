@@ -13,8 +13,8 @@ const ACCOUNTS = {
 // Daily metrics — بدون campaign عشان الداتا تبقى صغيرة
 const DAILY_FIELDS = {
   snapchat: 'date,spend,impressions,clicks,swipes,ctr,cpc,cpm,conversion_purchases,conversion_purchases_value,conversion_add_cart,total_reach,frequency',
-  meta: 'date,spend,impressions,clicks,ctr,cpc,cpm,action_values_purchase,actions_purchase',
-  tiktok: 'date,spend,impressions,clicks,conversions,ctr,cpc,cpm,complete_payment_roas',
+  meta: 'date,spend,impressions,clicks,ctr,cpc,cpm,action_values_purchase,actions_purchase,reach',
+  tiktok: 'date,spend,impressions,clicks,conversions,ctr,cpc,cpm,complete_payment_roas,reach',
   google: 'date,spend,impressions,clicks,conversions,ctr,cpc,conversion_value',
 };
 

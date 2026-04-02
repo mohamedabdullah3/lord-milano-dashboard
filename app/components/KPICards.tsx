@@ -79,7 +79,7 @@ export default function KPICards({ kpis }: KPICardsProps) {
       />
       <KPICard
         label="إجمالي الوصول"
-        sublabel="Snapchat فقط"
+        sublabel="Snap + Meta + TikTok"
         value={formatNumber(kpis.totalReach)}
         icon="🎯"
         accent="text-purple-400"

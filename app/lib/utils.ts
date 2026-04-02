@@ -73,7 +73,10 @@ export function computeKPIs(data: DashboardData): KPIData {
     data.tiktok.reduce((s, d) => s + (d.impressions || 0), 0) +
     data.google.reduce((s, d) => s + (d.impressions || 0), 0);
 
-  const totalReach = data.snapchat.reduce((s, d) => s + (d.total_reach || 0), 0);
+  const totalReach =
+    data.snapchat.reduce((s, d) => s + (d.total_reach || 0), 0) +
+    data.meta.reduce((s, d) => s + (d.reach || 0), 0) +
+    data.tiktok.reduce((s, d) => s + (d.reach || 0), 0);
 
   return { totalSpend, totalRevenue, totalROAS, totalPurchases, totalImpressions, totalReach };
 }

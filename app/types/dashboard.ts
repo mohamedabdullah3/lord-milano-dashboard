@@ -25,6 +25,7 @@ export interface MetaData {
   cpm: number;
   action_values_purchase: number;
   actions_purchase: number;
+  reach: number;
 }
 
 export interface TikTokData {
@@ -37,6 +38,7 @@ export interface TikTokData {
   cpc: number;
   cpm: number;
   complete_payment_roas: number;
+  reach: number;
 }
 
 export interface GoogleAdsData {
