@@ -486,10 +486,11 @@ export function aggregateGoogleAds(data: GoogleAdRaw[]): AdRow[] {
     });
 }
 
-export function classifyAds(ads: AdRow[], topN = 5): { winners: AdRow[]; weak: AdRow[] } {
+export function classifyAds(ads: AdRow[]): { winners: AdRow[]; average: AdRow[]; weak: AdRow[] } {
   const active = ads.filter((a) => a.spend >= MIN_SPEND_SAR);
   const sorted = [...active].sort((a, b) => b.roas - a.roas);
-  const winners = sorted.slice(0, topN);
-  const weak = sorted.slice(-topN).reverse().filter((a) => !winners.includes(a));
-  return { winners, weak };
+  const winners = sorted.filter((a) => a.roas > 4);
+  const average = sorted.filter((a) => a.roas >= 3 && a.roas <= 4);
+  const weak = sorted.filter((a) => a.roas < 3);
+  return { winners, average, weak };
 }
