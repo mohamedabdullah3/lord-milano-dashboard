@@ -52,8 +52,12 @@ export function computeKPIs(data: DashboardData): KPIData {
   const googleSpend = data.google.reduce((s, d) => s + (d.spend || 0), 0);
   const totalSpend = snapSpendSAR + metaSpend + tiktokSpend + googleSpend;
 
-  const snapchatRevenue = data.snapchat.reduce((s, d) => s + snapToSAR(d.conversion_purchases_value || 0), 0);
-  const snapchatROAS = snapSpendSAR > 0 ? snapchatRevenue / snapSpendSAR : 0;
+  // إيرادات كل المنصات
+  const snapRevenue = data.snapchat.reduce((s, d) => s + snapToSAR(d.conversion_purchases_value || 0), 0);
+  const metaRevenue = data.meta.reduce((s, d) => s + (d.action_values_purchase || 0), 0);
+  const googleRevenue = data.google.reduce((s, d) => s + (d.conversion_value || 0), 0);
+  const totalRevenue = snapRevenue + metaRevenue + googleRevenue;
+  const totalROAS = totalSpend > 0 ? totalRevenue / totalSpend : 0;
 
   const snapPurchases = data.snapchat.reduce((s, d) => s + (d.conversion_purchases || 0), 0);
   const tiktokConversions = data.tiktok.reduce((s, d) => s + (d.conversions || 0), 0);
@@ -68,7 +72,7 @@ export function computeKPIs(data: DashboardData): KPIData {
 
   const totalReach = data.snapchat.reduce((s, d) => s + (d.total_reach || 0), 0);
 
-  return { totalSpend, snapchatRevenue, snapchatROAS, totalPurchases, totalImpressions, totalReach };
+  return { totalSpend, totalRevenue, totalROAS, totalPurchases, totalImpressions, totalReach };
 }
 
 export function computePlatformSummaries(data: DashboardData): PlatformSummary[] {
@@ -219,11 +223,11 @@ export function computeInsights(data: DashboardData) {
 
   const highFreqCampaigns = campaigns.filter((c) => c.frequency > 5);
 
-  // Snapchat CPC: بالريال بعد التحويل | باقي المنصات: ريال مباشرة
-  const snapCPC = data.snapchat.reduce((s, d) => s + snapToSAR(d.cpc || 0), 0) / (data.snapchat.filter((d) => d.cpc).length || 1);
-  const metaCPC = data.meta.reduce((s, d) => s + (d.cpc || 0), 0) / (data.meta.filter((d) => d.cpc).length || 1);
-  const tiktokCPC = data.tiktok.reduce((s, d) => s + (d.cpc || 0), 0) / (data.tiktok.filter((d) => d.cpc).length || 1);
-  const googleCPC = data.google.reduce((s, d) => s + (d.cpc || 0), 0) / (data.google.filter((d) => d.cpc).length || 1);
+  // متوسط CPC لكل منصة
+  const snapCPC = data.snapchat.filter((d) => d.cpc).reduce((s, d) => s + snapToSAR(d.cpc), 0) / (data.snapchat.filter((d) => d.cpc).length || 1);
+  const metaCPC = data.meta.filter((d) => d.cpc).reduce((s, d) => s + d.cpc, 0) / (data.meta.filter((d) => d.cpc).length || 1);
+  const tiktokCPC = data.tiktok.filter((d) => d.cpc).reduce((s, d) => s + d.cpc, 0) / (data.tiktok.filter((d) => d.cpc).length || 1);
+  const googleCPC = data.google.filter((d) => d.cpc).reduce((s, d) => s + d.cpc, 0) / (data.google.filter((d) => d.cpc).length || 1);
 
   const cpcPlatforms = [
     { name: 'Snapchat', cpc: snapCPC },

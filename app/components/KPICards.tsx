@@ -34,9 +34,9 @@ interface KPICardsProps {
 
 export default function KPICards({ kpis }: KPICardsProps) {
   const roasColor =
-    kpis.snapchatROAS >= 3
+    kpis.totalROAS >= 3
       ? 'text-green-400'
-      : kpis.snapchatROAS >= 2
+      : kpis.totalROAS >= 2
       ? 'text-yellow-400'
       : 'text-red-400';
 
@@ -50,16 +50,16 @@ export default function KPICards({ kpis }: KPICardsProps) {
         accent="text-orange-400"
       />
       <KPICard
-        label="إيرادات المبيعات"
-        sublabel="Snapchat فقط"
-        value={formatCurrency(kpis.snapchatRevenue)}
+        label="إجمالي الإيرادات"
+        sublabel="Snap + Meta + Google"
+        value={formatCurrency(kpis.totalRevenue)}
         icon="💰"
         accent="text-yellow-400"
       />
       <KPICard
-        label="ROAS"
-        sublabel="Snapchat فقط"
-        value={formatROAS(kpis.snapchatROAS)}
+        label="إجمالي ROAS"
+        sublabel="كل المنصات"
+        value={formatROAS(kpis.totalROAS)}
         icon="📈"
         accent={roasColor}
       />

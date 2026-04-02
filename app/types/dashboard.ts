@@ -23,6 +23,7 @@ export interface MetaData {
   ctr: number;
   cpc: number;
   cpm: number;
+  action_values_purchase: number;
 }
 
 export interface TikTokData {
@@ -44,6 +45,7 @@ export interface GoogleAdsData {
   conversions: number;
   ctr: number;
   cpc: number;
+  conversion_value: number;
 }
 
 export interface DashboardData {
@@ -57,8 +59,8 @@ export interface DashboardData {
 
 export interface KPIData {
   totalSpend: number;
-  snapchatRevenue: number;
-  snapchatROAS: number;
+  totalRevenue: number;
+  totalROAS: number;
   totalPurchases: number;
   totalImpressions: number;
   totalReach: number;
