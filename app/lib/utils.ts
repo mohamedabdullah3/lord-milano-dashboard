@@ -188,48 +188,30 @@ export function aggregateCTRTrend(data: DashboardData) {
     });
 }
 
+// snapchatCampaigns: بيانات مجمّعة على مستوى الحملة بدون date dimension
 export function aggregateCampaigns(data: SnapchatData[]): CampaignRow[] {
-  const map = new Map<
-    string,
-    { spend: number; impressions: number; clicks: number; ctr: number[]; cpc: number[]; frequency: number[]; purchases: number; revenue: number }
-  >();
-
-  data.forEach((d) => {
-    const key = d.campaign || 'Unknown';
-    if (!map.has(key)) {
-      map.set(key, { spend: 0, impressions: 0, clicks: 0, ctr: [], cpc: [], frequency: [], purchases: 0, revenue: 0 });
-    }
-    const entry = map.get(key)!;
-    entry.spend += snapToSAR(d.spend || 0);
-    entry.impressions += d.impressions || 0;
-    entry.clicks += d.clicks || 0;
-    if (d.ctr) entry.ctr.push(d.ctr);
-    if (d.cpc) entry.cpc.push(snapToSAR(d.cpc));
-    if (d.frequency) entry.frequency.push(d.frequency);
-    entry.purchases += d.conversion_purchases || 0;
-    entry.revenue += snapToSAR(d.conversion_purchases_value || 0);
+  return data.map((d) => {
+    const spend = snapToSAR(d.spend || 0);
+    const revenue = snapToSAR(d.conversion_purchases_value || 0);
+    return {
+      campaign: d.campaign || 'Unknown',
+      spend,
+      impressions: d.impressions || 0,
+      ctr: d.ctr || 0,
+      cpc: snapToSAR(d.cpc || 0),
+      frequency: d.frequency || 0,
+      purchases: d.conversion_purchases || 0,
+      revenue,
+      roas: spend > 0 ? revenue / spend : 0,
+    };
   });
-
-  const avg = (arr: number[]) => (arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
-
-  return Array.from(map.entries()).map(([campaign, d]) => ({
-    campaign,
-    spend: d.spend,
-    impressions: d.impressions,
-    ctr: avg(d.ctr),
-    cpc: avg(d.cpc),
-    frequency: avg(d.frequency),
-    purchases: d.purchases,
-    revenue: d.revenue,
-    roas: d.spend > 0 ? d.revenue / d.spend : 0,
-  }));
 }
 
 export function computeInsights(data: DashboardData) {
   const roasDaily = aggregateSnapchatROAS(data.snapchat);
   const bestROASDay = roasDaily.reduce((best, d) => (d.roas > (best?.roas || 0) ? d : best), roasDaily[0] || null);
 
-  const campaigns = aggregateCampaigns(data.snapchat);
+  const campaigns = aggregateCampaigns(data.snapchatCampaigns);
   const topRevenueCampaign = campaigns.reduce(
     (best, c) => (c.revenue > (best?.revenue || 0) ? c : best),
     campaigns[0] || null

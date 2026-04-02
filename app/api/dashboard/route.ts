@@ -10,12 +10,16 @@ const ACCOUNTS = {
   google: { id: '861-389-5615', connector: 'google_ads' },
 };
 
-const FIELDS = {
-  snapchat: 'date,spend,impressions,clicks,swipes,ctr,cpc,cpm,conversion_purchases,conversion_purchases_value,conversion_add_cart,total_reach,frequency,campaign',
+// Daily metrics — بدون campaign عشان الداتا تبقى صغيرة
+const DAILY_FIELDS = {
+  snapchat: 'date,spend,impressions,clicks,swipes,ctr,cpc,cpm,conversion_purchases,conversion_purchases_value,conversion_add_cart,total_reach,frequency',
   meta: 'date,spend,impressions,clicks,ctr,cpc,cpm',
   tiktok: 'date,spend,impressions,clicks,conversions,ctr,cpc,cpm',
   google: 'date,spend,impressions,clicks,conversions,ctr,cpc',
 };
+
+// Campaigns — Snapchat فقط، بدون date عشان يجمع على مستوى الحملة
+const CAMPAIGN_FIELDS = 'campaign,spend,impressions,clicks,ctr,cpc,cpm,conversion_purchases,conversion_purchases_value,conversion_add_cart,total_reach,frequency';
 
 function getDatePreset(range: string): string {
   switch (range) {
@@ -45,12 +49,10 @@ async function fetchConnectorData(
   url.searchParams.set('fields', fields);
   url.searchParams.set('account_id', accountId);
 
-  const res = await fetch(url.toString(), {
-    next: { revalidate: 21600 }, // 6 hours
-  });
+  const res = await fetch(url.toString(), { cache: 'no-store' });
 
   if (!res.ok) {
-    console.error(`Failed to fetch ${connector}: ${res.status}`);
+    console.error(`Failed to fetch ${connector}: ${res.status} ${res.statusText}`);
     return [];
   }
 
@@ -66,11 +68,12 @@ export async function GET(request: NextRequest) {
   const datePreset = getDatePreset(range);
 
   try {
-    const [snapchat, meta, tiktok, google] = await Promise.allSettled([
-      fetchConnectorData(ACCOUNTS.snapchat.connector, ACCOUNTS.snapchat.id, FIELDS.snapchat, datePreset, dateFrom, dateTo),
-      fetchConnectorData(ACCOUNTS.meta.connector, ACCOUNTS.meta.id, FIELDS.meta, datePreset, dateFrom, dateTo),
-      fetchConnectorData(ACCOUNTS.tiktok.connector, ACCOUNTS.tiktok.id, FIELDS.tiktok, datePreset, dateFrom, dateTo),
-      fetchConnectorData(ACCOUNTS.google.connector, ACCOUNTS.google.id, FIELDS.google, datePreset, dateFrom, dateTo),
+    const [snapchat, meta, tiktok, google, snapchatCampaigns] = await Promise.allSettled([
+      fetchConnectorData(ACCOUNTS.snapchat.connector, ACCOUNTS.snapchat.id, DAILY_FIELDS.snapchat, datePreset, dateFrom, dateTo),
+      fetchConnectorData(ACCOUNTS.meta.connector, ACCOUNTS.meta.id, DAILY_FIELDS.meta, datePreset, dateFrom, dateTo),
+      fetchConnectorData(ACCOUNTS.tiktok.connector, ACCOUNTS.tiktok.id, DAILY_FIELDS.tiktok, datePreset, dateFrom, dateTo),
+      fetchConnectorData(ACCOUNTS.google.connector, ACCOUNTS.google.id, DAILY_FIELDS.google, datePreset, dateFrom, dateTo),
+      fetchConnectorData(ACCOUNTS.snapchat.connector, ACCOUNTS.snapchat.id, CAMPAIGN_FIELDS, datePreset, dateFrom, dateTo),
     ]);
 
     return NextResponse.json({
@@ -78,6 +81,7 @@ export async function GET(request: NextRequest) {
       meta: meta.status === 'fulfilled' ? meta.value : [],
       tiktok: tiktok.status === 'fulfilled' ? tiktok.value : [],
       google: google.status === 'fulfilled' ? google.value : [],
+      snapchatCampaigns: snapchatCampaigns.status === 'fulfilled' ? snapchatCampaigns.value : [],
       lastUpdated: new Date().toISOString(),
     });
   } catch (err) {

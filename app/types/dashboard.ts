@@ -51,6 +51,7 @@ export interface DashboardData {
   meta: MetaData[];
   tiktok: TikTokData[];
   google: GoogleAdsData[];
+  snapchatCampaigns: SnapchatData[];
   lastUpdated: string;
 }
 
