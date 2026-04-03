@@ -166,3 +166,242 @@ function getColumnIndex(header) {
   var index = map[header];
   return (index !== undefined) ? index : -1;
 }
+
+// ------------------------------------------------------------
+// SETUP FUNCTIONS
+// ------------------------------------------------------------
+
+/**
+ * Creates the "Kadena - Platforms" spreadsheet with three tabs:
+ * Meta, Snapchat, TikTok — each with identical headers A:P.
+ *
+ * Run this ONCE to bootstrap the platforms spreadsheet.
+ * Copy the logged Spreadsheet ID into CONFIG.PLATFORMS_SPREADSHEET_ID.
+ *
+ * @returns {string} The new spreadsheet's ID.
+ */
+function createPlatformsSpreadsheet() {
+  // -----------------------------------------------------------
+  // 1. Create the spreadsheet
+  // -----------------------------------------------------------
+  var ss = SpreadsheetApp.create('Kadena - Platforms');
+
+  // -----------------------------------------------------------
+  // 2. Define the header row (A–P, 16 columns)
+  //    Odd-numbered data columns have empty interleaved columns.
+  // -----------------------------------------------------------
+  var headers = [
+    'Row_Number',                          // A  col 1
+    'created_time',                        // B  col 2
+    '',                                    // C  col 3  (empty)
+    'ad_name',                             // D  col 4
+    '',                                    // E  col 5  (empty)
+    'adset_name',                          // F  col 6
+    '',                                    // G  col 7  (empty)
+    'campaign_name',                       // H  col 8
+    '',                                    // I  col 9  (empty)
+    'form_name',                           // J  col 10
+    '',                                    // K  col 11 (empty)
+    'platform',                            // L  col 12
+    'رقم_الجوال',                          // M  col 13
+    'ما_هو_الإجراء_المطلوب؟',             // N  col 14
+    'email',                               // O  col 15
+    'full_name'                            // P  col 16
+  ];
+
+  // Header styling
+  var HEADER_BG    = '#4285f4';
+  var HEADER_FG    = '#ffffff';
+
+  // -----------------------------------------------------------
+  // 3. Create the three platform tabs and style them
+  // -----------------------------------------------------------
+  var tabNames = ['Meta', 'Snapchat', 'TikTok'];
+
+  tabNames.forEach(function(tabName) {
+    var sheet = ss.insertSheet(tabName);
+
+    // Write headers
+    var headerRange = sheet.getRange(1, 1, 1, headers.length);
+    headerRange.setValues([headers]);
+
+    // Style: blue background, white bold text
+    headerRange
+      .setBackground(HEADER_BG)
+      .setFontColor(HEADER_FG)
+      .setFontWeight('bold');
+
+    // Freeze row 1
+    sheet.setFrozenRows(1);
+  });
+
+  // -----------------------------------------------------------
+  // 4. Remove the default "Sheet1" if it still exists
+  // -----------------------------------------------------------
+  var defaultSheet = ss.getSheetByName('Sheet1');
+  if (defaultSheet) {
+    ss.deleteSheet(defaultSheet);
+  }
+
+  // -----------------------------------------------------------
+  // 5. Log and return the new spreadsheet ID
+  // -----------------------------------------------------------
+  var id  = ss.getId();
+  var url = ss.getUrl();
+
+  Logger.log('=== Platforms Spreadsheet Created ===');
+  Logger.log('ID  : ' + id);
+  Logger.log('URL : ' + url);
+  Logger.log('Copy the ID above into CONFIG.PLATFORMS_SPREADSHEET_ID');
+
+  return id;
+}
+
+/**
+ * Sets up the CRM spreadsheet (CONFIG.CRM_SPREADSHEET_ID) by creating
+ * and formatting all required tabs: CRM, Config, Logs, Dashboard.
+ *
+ * Safe to re-run — existing tabs with data are never overwritten.
+ * Only creates a tab's structure when the tab is brand-new (lastRow === 0).
+ */
+function setupCRM() {
+  var ss = SpreadsheetApp.openById(CONFIG.CRM_SPREADSHEET_ID);
+
+  // -----------------------------------------------------------
+  // 1. CRM tab
+  // -----------------------------------------------------------
+  var crmSheet = getOrCreateSheet(ss, CONFIG.CRM_SHEET);
+
+  if (crmSheet.getLastRow() === 0) {
+    var crmHeaders = [
+      'Lead_ID',            // A
+      'created_time',       // B
+      'full_name',          // C
+      'phone',              // D
+      'email',              // E
+      'platform',           // F
+      'campaign_name',      // G
+      'doctor_name',        // H
+      'service_name',       // I
+      'form_answer',        // J
+      'lead_status',        // K
+      'first_contact_time', // L
+      'response_time_hours',// M
+      'no_booking_reason',  // N
+      'no_show_reason',     // O
+      'sales_agent',        // P
+      'notes',              // Q
+      'synced_to_doctor'    // R
+    ];
+
+    // Write header row
+    var crmHeaderRange = crmSheet.getRange(1, 1, 1, crmHeaders.length);
+    crmHeaderRange.setValues([crmHeaders]);
+
+    // Style: dark blue background, white bold text
+    crmHeaderRange
+      .setBackground('#1a73e8')
+      .setFontColor('#ffffff')
+      .setFontWeight('bold');
+
+    // Freeze row 1
+    crmSheet.setFrozenRows(1);
+
+    // M2: auto-calculate response time in hours from created_time (B) and
+    // first_contact_time (L). Formula covers the full column via ARRAYFORMULA.
+    crmSheet.getRange('M2').setFormula(
+      '=IF(L2="","",ROUND((L2-B2)*24,1))'
+    );
+
+    // -----------------------------------------------------------
+    // Data-validation dropdowns
+    // -----------------------------------------------------------
+
+    // Column K — lead_status (entire column, excluding header)
+    var leadStatusRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(
+        ['جديد', 'تم الاتصال', 'تم الحجز', 'لم يتم الحجز', 'حضر', 'لم يحضر', 'اتحول لعميل'],
+        true
+      )
+      .setAllowInvalid(false)
+      .build();
+    crmSheet.getRange(2, 11, crmSheet.getMaxRows() - 1, 1)
+      .setDataValidation(leadStatusRule);
+
+    // Column N — no_booking_reason (entire column, excluding header)
+    var noBookingRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(
+        ['السعر', 'عدم الاهتمام', 'لم يرد', 'أجّل', 'أخرى'],
+        true
+      )
+      .setAllowInvalid(false)
+      .build();
+    crmSheet.getRange(2, 14, crmSheet.getMaxRows() - 1, 1)
+      .setDataValidation(noBookingRule);
+
+    // Column O — no_show_reason (entire column, excluding header)
+    var noShowRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(
+        ['نسي', 'ظرف طارئ', 'لم يرد', 'أخرى'],
+        true
+      )
+      .setAllowInvalid(false)
+      .build();
+    crmSheet.getRange(2, 15, crmSheet.getMaxRows() - 1, 1)
+      .setDataValidation(noShowRule);
+  }
+
+  // -----------------------------------------------------------
+  // 2. Config tab
+  // -----------------------------------------------------------
+  var configSheet = getOrCreateSheet(ss, CONFIG.CONFIG_SHEET);
+
+  if (configSheet.getLastRow() === 0) {
+    var configHeaders = ['doctor_name', 'spreadsheet_url', 'active'];
+
+    var configHeaderRange = configSheet.getRange(1, 1, 1, configHeaders.length);
+    configHeaderRange.setValues([configHeaders]);
+
+    configHeaderRange
+      .setBackground('#34a853')
+      .setFontColor('#ffffff')
+      .setFontWeight('bold');
+
+    configSheet.setFrozenRows(1);
+
+    // Sample data row so the sheet isn't blank
+    configSheet.getRange(2, 1, 1, 3).setValues([
+      ['DrAhmed', 'https://docs.google.com/...', 'Yes']
+    ]);
+  }
+
+  // -----------------------------------------------------------
+  // 3. Logs tab
+  // -----------------------------------------------------------
+  var logsSheet = getOrCreateSheet(ss, CONFIG.LOGS_SHEET);
+
+  if (logsSheet.getLastRow() === 0) {
+    var logsHeaders = ['timestamp', 'function_name', 'message', 'status'];
+
+    var logsHeaderRange = logsSheet.getRange(1, 1, 1, logsHeaders.length);
+    logsHeaderRange.setValues([logsHeaders]);
+
+    logsHeaderRange
+      .setBackground('#ea4335')
+      .setFontColor('#ffffff')
+      .setFontWeight('bold');
+
+    logsSheet.setFrozenRows(1);
+  }
+
+  // -----------------------------------------------------------
+  // 4. Dashboard tab — empty placeholder for now
+  // -----------------------------------------------------------
+  getOrCreateSheet(ss, CONFIG.DASHBOARD_SHEET);
+
+  // -----------------------------------------------------------
+  // 5. Log completion
+  // -----------------------------------------------------------
+  logToSheet('setupCRM', 'CRM setup complete', 'OK');
+  Logger.log('setupCRM: CRM setup complete');
+}
