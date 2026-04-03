@@ -405,3 +405,322 @@ function setupCRM() {
   logToSheet('setupCRM', 'CRM setup complete', 'OK');
   Logger.log('setupCRM: CRM setup complete');
 }
+
+// ------------------------------------------------------------
+// SYNC FUNCTIONS
+// ------------------------------------------------------------
+
+/**
+ * Reads all platform tabs (Meta, Snapchat, TikTok) from the Platforms
+ * spreadsheet and writes net-new leads into the CRM sheet in one batch.
+ *
+ * Deduplication key: phone number (CRM column D).
+ * A row is skipped when:
+ *   - column M (index 12, phone) is blank/whitespace, OR
+ *   - the phone already exists in the CRM.
+ *
+ * All new rows are collected first, then written in a single setValues()
+ * call — never appendRow() inside a loop.
+ */
+function syncAllLeads() {
+  try {
+    var platformSS = SpreadsheetApp.openById(CONFIG.PLATFORMS_SPREADSHEET_ID);
+    var crmSS      = SpreadsheetApp.openById(CONFIG.CRM_SPREADSHEET_ID);
+    var crmSheet   = crmSS.getSheetByName(CONFIG.CRM_SHEET);
+
+    // ----------------------------------------------------------
+    // 1. Load all existing phones from CRM column D into a Set
+    // ----------------------------------------------------------
+    var existingPhones = new Set();
+    var crmLastRow = crmSheet.getLastRow();
+
+    if (crmLastRow > 1) {
+      var phonesData = crmSheet.getRange(2, 4, crmLastRow - 1, 1).getValues();
+      phonesData.forEach(function(row) {
+        var p = String(row[0]).trim();
+        if (p) existingPhones.add(p);
+      });
+    }
+
+    // ----------------------------------------------------------
+    // 2. Iterate source tabs and collect new lead rows
+    // ----------------------------------------------------------
+    var allNewRows  = [];   // rows destined for the CRM sheet
+    var tabSummary  = {};   // { tabName: count } for logging
+
+    CONFIG.SOURCE_TABS.forEach(function(tabName) {
+      var tabNewCount = 0;
+
+      try {
+        var srcSheet = platformSS.getSheetByName(tabName);
+        if (!srcSheet) {
+          Logger.log('syncAllLeads: tab not found — ' + tabName);
+          tabSummary[tabName] = 0;
+          return; // next tab
+        }
+
+        var srcLastRow = srcSheet.getLastRow();
+        if (srcLastRow < 2) {
+          tabSummary[tabName] = 0;
+          return; // no data rows
+        }
+
+        // Read entire data range in one call (skip header row 1)
+        var data = srcSheet.getRange(2, 1, srcLastRow - 1, 16).getValues();
+
+        data.forEach(function(row) {
+          // Column M = index 12 (0-based) → phone
+          var phone = String(row[12]).trim();
+          if (!phone) return;              // skip: no phone
+          if (existingPhones.has(phone)) return; // skip: duplicate
+
+          // Extract fields using getColumnIndex() 0-based mapping
+          var createdTime   = row[getColumnIndex('created_time')];   // index 1
+          var campaignName  = String(row[getColumnIndex('campaign_name')] || '').trim(); // index 7
+          var platform      = String(row[getColumnIndex('platform')]  || '').trim(); // index 11
+          var formAnswer    = row[getColumnIndex('form_answer')];     // index 13
+          var email         = row[getColumnIndex('email')];           // index 14
+          var fullName      = row[getColumnIndex('full_name')];       // index 15
+
+          // Use tab name as platform fallback when column L is empty
+          if (!platform) platform = tabName;
+
+          var doctorName  = extractDoctor(campaignName);
+          var serviceName = extractService(campaignName);
+
+          // Generate a unique Lead ID using the CRM sheet's current state
+          // plus any rows already collected in this run.
+          var leadId = generateLeadId(crmSheet);
+
+          // Build the 18-column CRM row
+          // [A]Lead_ID [B]created_time [C]full_name [D]phone [E]email
+          // [F]platform [G]campaign_name [H]doctor_name [I]service_name
+          // [J]form_answer [K]lead_status [L]first_contact_time
+          // [M]response_time_hours [N]no_booking_reason [O]no_show_reason
+          // [P]sales_agent [Q]notes [R]synced_to_doctor
+          var newRow = [
+            leadId,        // A — Lead_ID
+            createdTime,   // B — created_time
+            fullName,      // C — full_name
+            phone,         // D — phone
+            email,         // E — email
+            platform,      // F — platform
+            campaignName,  // G — campaign_name
+            doctorName,    // H — doctor_name
+            serviceName,   // I — service_name
+            formAnswer,    // J — form_answer
+            'جديد',        // K — lead_status  (default: new)
+            '',            // L — first_contact_time
+            '',            // M — response_time_hours (formula-driven)
+            '',            // N — no_booking_reason
+            '',            // O — no_show_reason
+            '',            // P — sales_agent
+            '',            // Q — notes
+            'No'           // R — synced_to_doctor
+          ];
+
+          allNewRows.push(newRow);
+          existingPhones.add(phone); // prevent cross-tab duplicates in this run
+          tabNewCount++;
+        });
+
+      } catch (tabErr) {
+        logToSheet('syncAllLeads', 'Error processing tab ' + tabName + ': ' + tabErr.message, 'ERROR');
+      }
+
+      tabSummary[tabName] = tabNewCount;
+    });
+
+    // ----------------------------------------------------------
+    // 3. Write all new rows in a single batch
+    // ----------------------------------------------------------
+    if (allNewRows.length > 0) {
+      var writeStartRow = crmSheet.getLastRow() + 1;
+      crmSheet
+        .getRange(writeStartRow, 1, allNewRows.length, 18)
+        .setValues(allNewRows);
+    }
+
+    SpreadsheetApp.flush();
+
+    // ----------------------------------------------------------
+    // 4. Log results
+    // ----------------------------------------------------------
+    var totalAdded = allNewRows.length;
+    var summary = CONFIG.SOURCE_TABS.map(function(t) {
+      return t + ': ' + (tabSummary[t] || 0);
+    }).join(' | ');
+
+    var msg = 'Total added: ' + totalAdded + ' (' + summary + ')';
+    logToSheet('syncAllLeads', msg, 'OK');
+    Logger.log('syncAllLeads: ' + msg);
+
+  } catch (e) {
+    logToSheet('syncAllLeads', e.message, 'ERROR');
+    Logger.log('syncAllLeads ERROR: ' + e.message);
+  }
+}
+
+/**
+ * Reads active doctor entries from the Config tab and pushes their
+ * unsynced CRM leads to the individual doctor spreadsheets.
+ *
+ * Each doctor spreadsheet receives a "Leads" sheet.
+ * Deduplication: a lead is skipped if its Lead_ID already exists in
+ * the doctor sheet's column A.
+ *
+ * After a successful push the CRM column R (synced_to_doctor) is
+ * updated to "Yes" in batch for all affected rows.
+ */
+function distributeToDoctor() {
+  var crmSS      = SpreadsheetApp.openById(CONFIG.CRM_SPREADSHEET_ID);
+  var crmSheet   = crmSS.getSheetByName(CONFIG.CRM_SHEET);
+  var configSheet = crmSS.getSheetByName(CONFIG.CONFIG_SHEET);
+
+  // ----------------------------------------------------------
+  // 1. Read Config tab — collect active doctor rows
+  // ----------------------------------------------------------
+  var configLastRow = configSheet.getLastRow();
+  if (configLastRow < 2) {
+    logToSheet('distributeToDoctor', 'No doctor rows in Config tab', 'OK');
+    return;
+  }
+
+  var configData = configSheet.getRange(2, 1, configLastRow - 1, 3).getValues();
+  var activeDoctors = configData.filter(function(row) {
+    return String(row[2]).trim().toLowerCase() === 'yes';
+  });
+
+  if (activeDoctors.length === 0) {
+    logToSheet('distributeToDoctor', 'No active doctors found in Config', 'OK');
+    return;
+  }
+
+  // ----------------------------------------------------------
+  // 2. Read ALL CRM data once
+  // ----------------------------------------------------------
+  var crmLastRow = crmSheet.getLastRow();
+  if (crmLastRow < 2) {
+    logToSheet('distributeToDoctor', 'CRM sheet has no data rows', 'OK');
+    return;
+  }
+
+  // Rows are 1-indexed in the sheet; store alongside their sheet row number
+  // so we can update column R later without re-scanning.
+  var crmData = crmSheet.getRange(2, 1, crmLastRow - 1, 18).getValues();
+  // crmData[i] corresponds to sheet row (i + 2)
+
+  // ----------------------------------------------------------
+  // 3. Process each active doctor
+  // ----------------------------------------------------------
+  activeDoctors.forEach(function(configRow) {
+    var doctorRaw = String(configRow[0]).trim();
+    var docUrl    = String(configRow[1]).trim();
+    var doctorKey = doctorRaw.toLowerCase(); // for case-insensitive comparison
+
+    try {
+      // Open the doctor's spreadsheet
+      var docSS    = SpreadsheetApp.openByUrl(docUrl);
+      var docSheet = getOrCreateSheet(docSS, 'Leads');
+
+      // --------------------------------------------------------
+      // 3a. Create headers if this is a fresh Leads sheet
+      // --------------------------------------------------------
+      var isNewSheet = docSheet.getLastRow() === 0;
+      if (isNewSheet) {
+        var docHeaders = [
+          'Lead_ID', 'full_name', 'phone', 'platform',
+          'service', 'lead_status', 'form_answer', 'notes'
+        ];
+        var docHeaderRange = docSheet.getRange(1, 1, 1, docHeaders.length);
+        docHeaderRange.setValues([docHeaders]);
+        docHeaderRange
+          .setBackground('#673ab7')
+          .setFontColor('#ffffff')
+          .setFontWeight('bold');
+        docSheet.setFrozenRows(1);
+      }
+
+      // --------------------------------------------------------
+      // 3b. Load existing Lead_IDs from doctor sheet column A
+      // --------------------------------------------------------
+      var existingLeadIds = new Set();
+      var docLastRow = docSheet.getLastRow();
+
+      if (docLastRow > 1) {
+        var docIds = docSheet.getRange(2, 1, docLastRow - 1, 1).getValues();
+        docIds.forEach(function(r) {
+          var id = String(r[0]).trim();
+          if (id) existingLeadIds.add(id);
+        });
+      }
+
+      // --------------------------------------------------------
+      // 3c. Find matching, unsynced CRM rows for this doctor
+      // --------------------------------------------------------
+      var rowsForDoctor  = [];  // 8-col rows to append to doctor sheet
+      var crmRowsToMark  = [];  // sheet row numbers to flip column R → "Yes"
+
+      crmData.forEach(function(crmRow, i) {
+        var crmDoctorKey = String(crmRow[7]).trim().toLowerCase(); // col H (index 7)
+        var syncedFlag   = String(crmRow[17]).trim();              // col R (index 17)
+        var leadId       = String(crmRow[0]).trim();               // col A (index 0)
+
+        if (crmDoctorKey !== doctorKey) return;
+        if (syncedFlag === 'Yes') return;
+        if (existingLeadIds.has(leadId)) return; // already in doctor sheet
+
+        // Build the 8-column doctor row
+        // A:Lead_ID B:full_name C:phone D:platform E:service F:lead_status G:form_answer H:notes
+        rowsForDoctor.push([
+          crmRow[0],   // Lead_ID
+          crmRow[2],   // full_name
+          crmRow[3],   // phone
+          crmRow[5],   // platform
+          crmRow[8],   // service_name
+          crmRow[10],  // lead_status
+          crmRow[9],   // form_answer
+          crmRow[16]   // notes
+        ]);
+
+        crmRowsToMark.push(i + 2); // sheet row = array index + 2 (1-header + 1-base)
+        existingLeadIds.add(leadId); // prevent duplicates within this batch
+      });
+
+      // --------------------------------------------------------
+      // 3d. Write new rows to doctor sheet in one batch
+      // --------------------------------------------------------
+      if (rowsForDoctor.length > 0) {
+        var writeStart = docSheet.getLastRow() + 1;
+        docSheet
+          .getRange(writeStart, 1, rowsForDoctor.length, 8)
+          .setValues(rowsForDoctor);
+      }
+
+      // --------------------------------------------------------
+      // 3e. Mark synced rows in CRM column R = "Yes" in batch
+      // --------------------------------------------------------
+      crmRowsToMark.forEach(function(sheetRow) {
+        crmSheet.getRange(sheetRow, 18).setValue('Yes'); // col R = column 18
+      });
+
+      var msg = 'Sent ' + rowsForDoctor.length + ' lead(s) to ' + doctorRaw;
+      logToSheet('distributeToDoctor', msg, 'OK');
+      Logger.log('distributeToDoctor: ' + msg);
+
+    } catch (docErr) {
+      logToSheet(
+        'distributeToDoctor',
+        'Error for doctor ' + doctorRaw + ': ' + docErr.message,
+        'ERROR'
+      );
+      Logger.log('distributeToDoctor ERROR (' + doctorRaw + '): ' + docErr.message);
+    }
+  });
+
+  // ----------------------------------------------------------
+  // 4. Flush all pending writes at once
+  // ----------------------------------------------------------
+  SpreadsheetApp.flush();
+  logToSheet('distributeToDoctor', 'Distribution complete', 'OK');
+}
