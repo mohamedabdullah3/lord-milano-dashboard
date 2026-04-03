@@ -724,3 +724,364 @@ function distributeToDoctor() {
   SpreadsheetApp.flush();
   logToSheet('distributeToDoctor', 'Distribution complete', 'OK');
 }
+
+// ------------------------------------------------------------
+// STATUS SYNC & REPORTING FUNCTIONS
+// ------------------------------------------------------------
+
+/**
+ * Reads lead_status updates from every active doctor's "Leads" sheet
+ * and writes any changes back to CRM column K (lead_status).
+ *
+ * Flow:
+ *   1. Load CRM data into a Map<Lead_ID → {rowIndex, currentStatus}>
+ *   2. For each active doctor, read their Leads sheet columns A & F
+ *   3. Collect CRM cells that need updating
+ *   4. Write all updates in one batch per affected row then flush
+ */
+function syncStatusFromDoctors() {
+  var crmSS       = SpreadsheetApp.openById(CONFIG.CRM_SPREADSHEET_ID);
+  var crmSheet    = crmSS.getSheetByName(CONFIG.CRM_SHEET);
+  var configSheet = crmSS.getSheetByName(CONFIG.CONFIG_SHEET);
+
+  // ----------------------------------------------------------
+  // 1. Read Config tab — active doctors only
+  // ----------------------------------------------------------
+  var configLastRow = configSheet.getLastRow();
+  if (configLastRow < 2) {
+    logToSheet('syncStatusFromDoctors', 'No doctor rows in Config tab', 'OK');
+    return;
+  }
+
+  var configData    = configSheet.getRange(2, 1, configLastRow - 1, 3).getValues();
+  var activeDoctors = configData.filter(function(row) {
+    return String(row[2]).trim().toLowerCase() === 'yes';
+  });
+
+  if (activeDoctors.length === 0) {
+    logToSheet('syncStatusFromDoctors', 'No active doctors found', 'OK');
+    return;
+  }
+
+  // ----------------------------------------------------------
+  // 2. Read ALL CRM data once — build Lead_ID → row map
+  //    Map value: { sheetRow: number, status: string }
+  // ----------------------------------------------------------
+  var crmLastRow = crmSheet.getLastRow();
+  if (crmLastRow < 2) {
+    logToSheet('syncStatusFromDoctors', 'CRM sheet has no data rows', 'OK');
+    return;
+  }
+
+  var crmData   = crmSheet.getRange(2, 1, crmLastRow - 1, 11).getValues();
+  // columns read: A(0)=Lead_ID … K(10)=lead_status
+  var leadIdMap = new Map(); // Lead_ID → { sheetRow, status }
+
+  crmData.forEach(function(row, i) {
+    var leadId = String(row[0]).trim();
+    if (leadId) {
+      leadIdMap.set(leadId, {
+        sheetRow: i + 2,            // 1-based sheet row
+        status:   String(row[10]).trim() // col K = index 10
+      });
+    }
+  });
+
+  // ----------------------------------------------------------
+  // 3. Accumulate all status updates across all doctors
+  //    updates = [ { sheetRow, newStatus }, … ]
+  // ----------------------------------------------------------
+  var updates = []; // { sheetRow: number, newStatus: string }
+
+  activeDoctors.forEach(function(configRow) {
+    var doctorRaw = String(configRow[0]).trim();
+    var docUrl    = String(configRow[1]).trim();
+
+    try {
+      var docSS    = SpreadsheetApp.openByUrl(docUrl);
+      var docSheet = docSS.getSheetByName('Leads');
+
+      if (!docSheet) {
+        logToSheet('syncStatusFromDoctors', 'Leads sheet missing for ' + doctorRaw, 'OK');
+        return;
+      }
+
+      var docLastRow = docSheet.getLastRow();
+      if (docLastRow < 2) return; // no data yet
+
+      // Read col A (Lead_ID) and col F (lead_status) together
+      var docData     = docSheet.getRange(2, 1, docLastRow - 1, 6).getValues();
+      var updatedCount = 0;
+
+      docData.forEach(function(docRow) {
+        var leadId    = String(docRow[0]).trim();  // col A
+        var docStatus = String(docRow[5]).trim();  // col F
+
+        if (!leadId || !docStatus) return;
+
+        var crmEntry = leadIdMap.get(leadId);
+        if (!crmEntry) return;                     // lead not in CRM (shouldn't happen)
+        if (crmEntry.status === docStatus) return; // no change
+
+        updates.push({ sheetRow: crmEntry.sheetRow, newStatus: docStatus });
+        // Keep the map current so later doctors can't re-overwrite with stale data
+        crmEntry.status = docStatus;
+        updatedCount++;
+      });
+
+      logToSheet(
+        'syncStatusFromDoctors',
+        'Updated ' + updatedCount + ' status(es) from ' + doctorRaw,
+        'OK'
+      );
+
+    } catch (docErr) {
+      logToSheet(
+        'syncStatusFromDoctors',
+        'Error for doctor ' + doctorRaw + ': ' + docErr.message,
+        'ERROR'
+      );
+    }
+  });
+
+  // ----------------------------------------------------------
+  // 4. Write all status updates to CRM column K in one pass
+  // ----------------------------------------------------------
+  updates.forEach(function(upd) {
+    crmSheet.getRange(upd.sheetRow, 11).setValue(upd.newStatus); // col K = column 11
+  });
+
+  SpreadsheetApp.flush();
+
+  var totalMsg = 'Sync complete — ' + updates.length + ' CRM status(es) updated';
+  logToSheet('syncStatusFromDoctors', totalMsg, 'OK');
+  Logger.log('syncStatusFromDoctors: ' + totalMsg);
+}
+
+/**
+ * Calculates daily KPIs from the CRM sheet and sends an Arabic HTML
+ * report to CONFIG.REPORT_EMAIL.
+ *
+ * Metrics:
+ *   - leads_today          rows with created_time date = today
+ *   - by_platform_today    per-platform breakdown for today
+ *   - no_contact_24h       status = "جديد" AND created_time < now − 24 h
+ *   - total_booked         status = "تم الحجز"   (all time)
+ *   - total_converted      status = "اتحول لعميل" (all time)
+ *   - total_showed         status = "حضر"          (all time)
+ */
+function sendDailyReport() {
+  try {
+    var crmSS    = SpreadsheetApp.openById(CONFIG.CRM_SPREADSHEET_ID);
+    var crmSheet = crmSS.getSheetByName(CONFIG.CRM_SHEET);
+
+    var crmLastRow = crmSheet.getLastRow();
+    if (crmLastRow < 2) {
+      logToSheet('sendDailyReport', 'No CRM data — report skipped', 'OK');
+      return;
+    }
+
+    // Read cols A–K (11 columns): Lead_ID … lead_status
+    var data = crmSheet.getRange(2, 1, crmLastRow - 1, 11).getValues();
+
+    var now        = new Date();
+    var todayStr   = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    var oneDayMs   = 24 * 60 * 60 * 1000;
+    var cutoff24h  = new Date(now.getTime() - oneDayMs);
+
+    // ----------------------------------------------------------
+    // Metric accumulators
+    // ----------------------------------------------------------
+    var leadsToday       = 0;
+    var platformCounts   = {};  // { platformName: count }
+    var noContact24h     = 0;
+    var totalBooked      = 0;
+    var totalConverted   = 0;
+    var totalShowed      = 0;
+
+    data.forEach(function(row) {
+      var createdRaw = row[1];   // col B — created_time
+      var platform   = String(row[5] || '').trim();  // col F
+      var status     = String(row[10] || '').trim(); // col K
+
+      var createdDate = (createdRaw instanceof Date) ? createdRaw : new Date(createdRaw);
+      var isValidDate = !isNaN(createdDate.getTime());
+
+      // Today's leads
+      if (isValidDate) {
+        var rowDateStr = Utilities.formatDate(createdDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        if (rowDateStr === todayStr) {
+          leadsToday++;
+          platformCounts[platform] = (platformCounts[platform] || 0) + 1;
+        }
+      }
+
+      // No-contact in last 24 h: still "جديد" and older than 24 h
+      if (status === 'جديد' && isValidDate && createdDate < cutoff24h) {
+        noContact24h++;
+      }
+
+      // All-time counters
+      if (status === 'تم الحجز')      totalBooked++;
+      if (status === 'اتحول لعميل')   totalConverted++;
+      if (status === 'حضر')           totalShowed++;
+    });
+
+    // ----------------------------------------------------------
+    // Build platform breakdown rows
+    // ----------------------------------------------------------
+    var platformRows = Object.keys(platformCounts).map(function(p) {
+      return '<tr><td style="padding:6px 12px;border:1px solid #ddd;">' + p + '</td>'
+           + '<td style="padding:6px 12px;border:1px solid #ddd;text-align:center;">' + platformCounts[p] + '</td></tr>';
+    }).join('');
+
+    if (!platformRows) {
+      platformRows = '<tr><td colspan="2" style="padding:6px 12px;border:1px solid #ddd;color:#999;">لا توجد بيانات</td></tr>';
+    }
+
+    // Highlight no-contact cell in red when non-zero
+    var noContactStyle = noContact24h > 0
+      ? 'background:#fce8e6;color:#c62828;font-weight:bold;'
+      : '';
+
+    // ----------------------------------------------------------
+    // Build HTML email (RTL Arabic)
+    // ----------------------------------------------------------
+    var formattedDate = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+
+    var html = '<!DOCTYPE html>'
+      + '<html dir="rtl" lang="ar">'
+      + '<head><meta charset="UTF-8">'
+      + '<style>'
+      + '  body { font-family: Arial, sans-serif; direction: rtl; background: #f5f5f5; margin: 0; padding: 20px; }'
+      + '  .container { max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px;'
+      + '               box-shadow: 0 2px 8px rgba(0,0,0,.1); overflow: hidden; }'
+      + '  .header { background: #1a73e8; color: #fff; padding: 20px 24px; }'
+      + '  .header h2 { margin: 0; font-size: 20px; }'
+      + '  .header p  { margin: 4px 0 0; font-size: 13px; opacity: .85; }'
+      + '  .section { padding: 16px 24px; }'
+      + '  .section h3 { margin: 0 0 10px; font-size: 15px; color: #1a73e8; border-bottom: 2px solid #e8f0fe; padding-bottom: 6px; }'
+      + '  table { width: 100%; border-collapse: collapse; font-size: 14px; }'
+      + '  th { background: #e8f0fe; color: #1a73e8; padding: 8px 12px; border: 1px solid #ddd; text-align: right; }'
+      + '  td { padding: 6px 12px; border: 1px solid #ddd; }'
+      + '  tr:nth-child(even) td { background: #fafafa; }'
+      + '  .footer { background: #f1f3f4; padding: 12px 24px; font-size: 12px; color: #777; text-align: center; }'
+      + '</style>'
+      + '</head><body>'
+      + '<div class="container">'
+
+      // Header
+      + '<div class="header">'
+      + '  <h2>تقرير كادينا اليومي</h2>'
+      + '  <p>' + formattedDate + '</p>'
+      + '</div>'
+
+      // Today's summary
+      + '<div class="section">'
+      + '  <h3>ملخص اليوم</h3>'
+      + '  <table>'
+      + '    <tr><th>المؤشر</th><th style="text-align:center;">العدد</th></tr>'
+      + '    <tr><td>عدد الليدز اليوم</td><td style="text-align:center;font-weight:bold;">' + leadsToday + '</td></tr>'
+      + '    <tr><td style="' + noContactStyle + '">ليدز بدون تواصل (أكثر من 24 ساعة)</td>'
+      + '        <td style="text-align:center;' + noContactStyle + '">' + noContact24h + '</td></tr>'
+      + '  </table>'
+      + '</div>'
+
+      // Platform breakdown
+      + '<div class="section">'
+      + '  <h3>الليدز اليوم حسب المنصة</h3>'
+      + '  <table>'
+      + '    <tr><th>المنصة</th><th style="text-align:center;">العدد</th></tr>'
+      + platformRows
+      + '  </table>'
+      + '</div>'
+
+      // All-time counters
+      + '<div class="section">'
+      + '  <h3>إجمالي الأداء (كل الوقت)</h3>'
+      + '  <table>'
+      + '    <tr><th>المؤشر</th><th style="text-align:center;">العدد</th></tr>'
+      + '    <tr><td>تم الحجز</td><td style="text-align:center;">'      + totalBooked    + '</td></tr>'
+      + '    <tr><td>حضر</td><td style="text-align:center;">'            + totalShowed    + '</td></tr>'
+      + '    <tr><td>تحول لعميل</td><td style="text-align:center;">'    + totalConverted + '</td></tr>'
+      + '  </table>'
+      + '</div>'
+
+      + '<div class="footer">تم الإرسال تلقائياً من نظام CRM كادينا</div>'
+      + '</div>'
+      + '</body></html>';
+
+    // ----------------------------------------------------------
+    // Send email
+    // ----------------------------------------------------------
+    MailApp.sendEmail({
+      to:       CONFIG.REPORT_EMAIL,
+      subject:  'تقرير كادينا اليومي - ' + formattedDate,
+      htmlBody: html
+    });
+
+    logToSheet('sendDailyReport', 'Report sent to ' + CONFIG.REPORT_EMAIL, 'OK');
+    Logger.log('sendDailyReport: report sent to ' + CONFIG.REPORT_EMAIL);
+
+  } catch (e) {
+    logToSheet('sendDailyReport', e.message, 'ERROR');
+    Logger.log('sendDailyReport ERROR: ' + e.message);
+  }
+}
+
+/**
+ * Removes ALL existing project triggers then re-creates the four
+ * scheduled triggers for the CRM automation pipeline.
+ *
+ * Trigger schedule:
+ *   syncAllLeads          → every 15 minutes
+ *   distributeToDoctor    → every 30 minutes
+ *   syncStatusFromDoctors → every 30 minutes
+ *   sendDailyReport       → daily, 9–10 AM (script timezone)
+ *
+ * Run this ONCE after setup, or whenever you need to reset the schedule.
+ */
+function setupAllTriggers() {
+  // ----------------------------------------------------------
+  // 1. Delete every existing trigger for this project
+  // ----------------------------------------------------------
+  ScriptApp.getProjectTriggers().forEach(function(trigger) {
+    ScriptApp.deleteTrigger(trigger);
+  });
+
+  // ----------------------------------------------------------
+  // 2. syncAllLeads — every 15 minutes
+  // ----------------------------------------------------------
+  ScriptApp.newTrigger('syncAllLeads')
+    .timeBased()
+    .everyMinutes(15)
+    .create();
+
+  // ----------------------------------------------------------
+  // 3. distributeToDoctor — every 30 minutes
+  // ----------------------------------------------------------
+  ScriptApp.newTrigger('distributeToDoctor')
+    .timeBased()
+    .everyMinutes(30)
+    .create();
+
+  // ----------------------------------------------------------
+  // 4. syncStatusFromDoctors — every 30 minutes
+  // ----------------------------------------------------------
+  ScriptApp.newTrigger('syncStatusFromDoctors')
+    .timeBased()
+    .everyMinutes(30)
+    .create();
+
+  // ----------------------------------------------------------
+  // 5. sendDailyReport — daily between 9 AM and 10 AM
+  // ----------------------------------------------------------
+  ScriptApp.newTrigger('sendDailyReport')
+    .timeBased()
+    .everyDays(1)
+    .atHour(9)
+    .create();
+
+  logToSheet('setupAllTriggers', 'Triggers set up successfully', 'OK');
+  Logger.log('setupAllTriggers: 4 triggers created successfully');
+}
