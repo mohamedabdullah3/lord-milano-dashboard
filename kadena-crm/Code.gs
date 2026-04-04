@@ -16,6 +16,7 @@ const CONFIG = {
   CONFIG_SHEET:             'Config',
   LOGS_SHEET:               'Logs',
   DASHBOARD_SHEET:          'Dashboard',
+  DOCTORS_SHEET:            'Doctors',       // admin roster tab inside CRM SS
 
   // CRM column positions (1-based) — update here if layout ever changes
   COL: {
@@ -1152,7 +1153,23 @@ function setupAllTriggers() {
     .create();
 
   // ----------------------------------------------------------
-  // 5. sendDailyReport — daily between 9 AM and 10 AM
+  // 5. syncBookedToDoctors — every 30 minutes
+  // ----------------------------------------------------------
+  ScriptApp.newTrigger('syncBookedToDoctors')
+    .timeBased()
+    .everyMinutes(30)
+    .create();
+
+  // ----------------------------------------------------------
+  // 6. syncAttendanceFromDoctors — every 30 minutes
+  // ----------------------------------------------------------
+  ScriptApp.newTrigger('syncAttendanceFromDoctors')
+    .timeBased()
+    .everyMinutes(30)
+    .create();
+
+  // ----------------------------------------------------------
+  // 7. sendDailyReport — daily between 9 AM and 10 AM
   // ----------------------------------------------------------
   ScriptApp.newTrigger('sendDailyReport')
     .timeBased()
@@ -1161,7 +1178,360 @@ function setupAllTriggers() {
     .create();
 
   logToSheet('setupAllTriggers', 'Triggers set up successfully', 'OK');
-  Logger.log('setupAllTriggers: 4 triggers created successfully');
+  Logger.log('setupAllTriggers: 6 triggers created successfully');
+}
+
+// ------------------------------------------------------------
+// DOCTOR SHEETS FUNCTIONS
+// ------------------------------------------------------------
+
+/**
+ * One-time setup: creates the "Doctors" admin tab inside the CRM
+ * spreadsheet (if it doesn't already exist) with the doctor roster.
+ *
+ * Doctors tab columns:
+ *   A: doctor_name  B: active (Yes / No)
+ *
+ * The tab is the source of truth for which doctors get their own
+ * per-doctor tab populated by syncBookedToDoctors().
+ */
+function setupDoctorSheets() {
+  var ss           = SpreadsheetApp.openById(CONFIG.CRM_SPREADSHEET_ID);
+  var doctorsSheet = getOrCreateSheet(ss, CONFIG.DOCTORS_SHEET);
+
+  if (doctorsSheet.getLastRow() === 0) {
+    // Write header row
+    var headerRange = doctorsSheet.getRange(1, 1, 1, 2);
+    headerRange.setValues([['doctor_name', 'active']]);
+    headerRange
+      .setBackground('#673ab7')
+      .setFontColor('#ffffff')
+      .setFontWeight('bold');
+    doctorsSheet.setFrozenRows(1);
+
+    // Add data-validation dropdown for column B (active)
+    doctorsSheet.getRange(2, 2, doctorsSheet.getMaxRows() - 1, 1)
+      .setDataValidation(
+        SpreadsheetApp.newDataValidation()
+          .requireValueInList(['Yes', 'No'], true)
+          .setAllowInvalid(false)
+          .build()
+      );
+
+    // Sample row
+    doctorsSheet.getRange(2, 1, 1, 2).setValues([['DrAhmed', 'Yes']]);
+
+    doctorsSheet.setColumnWidth(1, 180);
+    doctorsSheet.setColumnWidth(2, 80);
+  }
+
+  logToSheet('setupDoctorSheets', 'Doctors tab ready', 'OK');
+  Logger.log('setupDoctorSheets: complete');
+}
+
+/**
+ * Reads all active doctors from the "Doctors" tab, then for each doctor:
+ *   - Gets or creates a tab named after them inside the CRM spreadsheet.
+ *   - Creates the tab headers on first use (purple #673ab7, white, bold).
+ *   - Appends every CRM row where:
+ *       doctor_name matches (case-insensitive) AND
+ *       booking_status = "تم الحجز" AND
+ *       Lead_ID is NOT already present in the doctor tab.
+ *
+ * Doctor tab columns:
+ *   A:Lead_ID  B:full_name  C:phone  D:service_name
+ *   E:booking_date  F:attendance_status  G:notes
+ *
+ * attendance_status dropdown: حضر / لم يحضر / إعادة جدولة
+ *
+ * Runs every 30 minutes via setupAllTriggers().
+ */
+function syncBookedToDoctors() {
+  try {
+    var ss          = SpreadsheetApp.openById(CONFIG.CRM_SPREADSHEET_ID);
+    var crmSheet    = ss.getSheetByName(CONFIG.CRM_SHEET);
+    var doctorsMeta = ss.getSheetByName(CONFIG.DOCTORS_SHEET);
+
+    if (!doctorsMeta) {
+      logToSheet('syncBookedToDoctors', 'Doctors tab missing — run setupDoctorSheets() first', 'ERROR');
+      return;
+    }
+
+    // ----------------------------------------------------------
+    // 1. Load active doctors from the Doctors tab
+    // ----------------------------------------------------------
+    var metaLastRow = doctorsMeta.getLastRow();
+    if (metaLastRow < 2) {
+      logToSheet('syncBookedToDoctors', 'No doctors in Doctors tab', 'OK');
+      return;
+    }
+
+    var metaData     = doctorsMeta.getRange(2, 1, metaLastRow - 1, 2).getValues();
+    var activeDoctors = metaData.filter(function(r) {
+      return String(r[1]).trim().toLowerCase() === 'yes';
+    }).map(function(r) {
+      return String(r[0]).trim();
+    });
+
+    if (activeDoctors.length === 0) {
+      logToSheet('syncBookedToDoctors', 'No active doctors found', 'OK');
+      return;
+    }
+
+    // ----------------------------------------------------------
+    // 2. Read ALL CRM data once (20 columns)
+    // ----------------------------------------------------------
+    var crmLastRow = crmSheet.getLastRow();
+    if (crmLastRow < 2) {
+      logToSheet('syncBookedToDoctors', 'CRM has no data rows', 'OK');
+      return;
+    }
+
+    // Read cols A–S (19 cols) — everything except synced_to_doctor (T)
+    var crmData = crmSheet.getRange(2, 1, crmLastRow - 1, 19).getValues();
+
+    // Col indices (0-based):
+    // 0=Lead_ID 1=created_time 2=full_name 3=phone 4=email
+    // 5=platform 6=campaign_name 7=doctor_name 8=service_name
+    // 9=form_answer 10=contact_status 11=booking_status
+    // 12=attendance_status 13=first_contact_time 14=response_time_hrs
+    // 15=no_booking_reason 16=no_show_reason 17=sales_agent 18=notes
+
+    var COL = {
+      LEAD_ID:           0,
+      FULL_NAME:         2,
+      PHONE:             3,
+      SERVICE_NAME:      8,
+      BOOKING_STATUS:    11,
+      ATTENDANCE_STATUS: 12,
+      FIRST_CONTACT:     13,
+      NOTES:             18,
+      DOCTOR_NAME:       7
+    };
+
+    // ----------------------------------------------------------
+    // 3. Process each active doctor
+    // ----------------------------------------------------------
+    var ATTEND_VALUES = CONFIG.ATTENDANCE_STATUS_VALUES; // ['حضر','لم يحضر','إعادة جدولة']
+    var HEADER_BG     = '#673ab7';
+    var DOC_HEADERS   = ['Lead_ID','full_name','phone','service_name',
+                         'booking_date','attendance_status','notes'];
+
+    activeDoctors.forEach(function(doctorName) {
+      try {
+        var doctorKey = doctorName.toLowerCase();
+
+        // Get or create the per-doctor tab
+        var docSheet  = getOrCreateSheet(ss, doctorName);
+        var isNew     = docSheet.getLastRow() === 0;
+
+        if (isNew) {
+          // Write headers
+          var hRange = docSheet.getRange(1, 1, 1, DOC_HEADERS.length);
+          hRange.setValues([DOC_HEADERS]);
+          hRange.setBackground(HEADER_BG)
+                .setFontColor('#ffffff')
+                .setFontWeight('bold');
+          docSheet.setFrozenRows(1);
+
+          // Attendance dropdown on col F (column 6), whole column
+          var maxRows = docSheet.getMaxRows() - 1;
+          docSheet.getRange(2, 6, maxRows, 1)
+            .setDataValidation(
+              SpreadsheetApp.newDataValidation()
+                .requireValueInList(ATTEND_VALUES, true)
+                .setAllowInvalid(false)
+                .build()
+            );
+
+          // Column widths
+          [1,2,3,4,5,6,7].forEach(function(c, i) {
+            var widths = [130, 160, 120, 140, 130, 140, 180];
+            docSheet.setColumnWidth(c, widths[i]);
+          });
+        }
+
+        // Load existing Lead_IDs from doctor tab col A
+        var existingIds = new Set();
+        var docLastRow  = docSheet.getLastRow();
+
+        if (docLastRow > 1) {
+          docSheet.getRange(2, 1, docLastRow - 1, 1).getValues()
+            .forEach(function(r) {
+              var id = String(r[0]).trim();
+              if (id) existingIds.add(id);
+            });
+        }
+
+        // Find matching CRM rows: booked + this doctor + not already synced
+        var rowsToAppend = [];
+
+        crmData.forEach(function(row) {
+          var crmDoctor      = String(row[COL.DOCTOR_NAME]).trim().toLowerCase();
+          var bookingStatus  = String(row[COL.BOOKING_STATUS]).trim();
+          var leadId         = String(row[COL.LEAD_ID]).trim();
+
+          if (crmDoctor !== doctorKey)       return;
+          if (bookingStatus !== 'تم الحجز') return;
+          if (!leadId)                       return;
+          if (existingIds.has(leadId))       return;
+
+          // booking_date = first_contact_time (best proxy available)
+          var bookingDate = row[COL.FIRST_CONTACT] || '';
+
+          rowsToAppend.push([
+            leadId,                              // A Lead_ID
+            row[COL.FULL_NAME],                  // B full_name
+            row[COL.PHONE],                      // C phone
+            row[COL.SERVICE_NAME],               // D service_name
+            bookingDate,                         // E booking_date
+            row[COL.ATTENDANCE_STATUS] || '',    // F attendance_status
+            row[COL.NOTES]             || ''     // G notes
+          ]);
+
+          existingIds.add(leadId); // prevent duplicates within same batch
+        });
+
+        // Append new rows in one batch
+        if (rowsToAppend.length > 0) {
+          var writeStart = docSheet.getLastRow() + 1;
+          docSheet
+            .getRange(writeStart, 1, rowsToAppend.length, 7)
+            .setValues(rowsToAppend);
+        }
+
+        var msg = 'Synced ' + rowsToAppend.length + ' booked lead(s) to tab "' + doctorName + '"';
+        logToSheet('syncBookedToDoctors', msg, 'OK');
+        Logger.log('syncBookedToDoctors: ' + msg);
+
+      } catch (docErr) {
+        logToSheet('syncBookedToDoctors',
+          'Error for doctor "' + doctorName + '": ' + docErr.message, 'ERROR');
+      }
+    });
+
+    SpreadsheetApp.flush();
+
+  } catch (e) {
+    logToSheet('syncBookedToDoctors', e.message, 'ERROR');
+    Logger.log('syncBookedToDoctors ERROR: ' + e.message);
+  }
+}
+
+/**
+ * Reads the attendance_status column (F) from each active doctor's tab
+ * and writes any changes back to CRM column M (attendance_status).
+ *
+ * Deduplication: only rows where the doctor's value differs from the
+ * current CRM value are updated.
+ *
+ * Runs every 30 minutes via setupAllTriggers().
+ */
+function syncAttendanceFromDoctors() {
+  try {
+    var ss          = SpreadsheetApp.openById(CONFIG.CRM_SPREADSHEET_ID);
+    var crmSheet    = ss.getSheetByName(CONFIG.CRM_SHEET);
+    var doctorsMeta = ss.getSheetByName(CONFIG.DOCTORS_SHEET);
+
+    if (!doctorsMeta) {
+      logToSheet('syncAttendanceFromDoctors', 'Doctors tab missing', 'ERROR');
+      return;
+    }
+
+    // ----------------------------------------------------------
+    // 1. Load active doctors
+    // ----------------------------------------------------------
+    var metaLastRow  = doctorsMeta.getLastRow();
+    if (metaLastRow < 2) return;
+
+    var metaData     = doctorsMeta.getRange(2, 1, metaLastRow - 1, 2).getValues();
+    var activeDoctors = metaData
+      .filter(function(r) { return String(r[1]).trim().toLowerCase() === 'yes'; })
+      .map(function(r)    { return String(r[0]).trim(); });
+
+    if (activeDoctors.length === 0) return;
+
+    // ----------------------------------------------------------
+    // 2. Read ALL CRM data once — build Lead_ID → {sheetRow, attendStatus}
+    // ----------------------------------------------------------
+    var crmLastRow = crmSheet.getLastRow();
+    if (crmLastRow < 2) return;
+
+    // Read cols A (Lead_ID) and M (attendance_status) — columns 1 and 13
+    var crmData = crmSheet.getRange(2, 1, crmLastRow - 1, 13).getValues();
+
+    var leadMap = new Map(); // Lead_ID → { sheetRow, attendStatus }
+    crmData.forEach(function(row, i) {
+      var leadId = String(row[0]).trim();
+      if (leadId) {
+        leadMap.set(leadId, {
+          sheetRow:     i + 2,                    // 1-based sheet row
+          attendStatus: String(row[12]).trim()    // col M = index 12
+        });
+      }
+    });
+
+    // ----------------------------------------------------------
+    // 3. For each doctor tab, collect attendance updates
+    // ----------------------------------------------------------
+    var updates      = []; // { sheetRow, newStatus }
+    var totalUpdated = 0;
+
+    activeDoctors.forEach(function(doctorName) {
+      try {
+        var docSheet = ss.getSheetByName(doctorName);
+        if (!docSheet) return; // tab doesn't exist yet — skip
+
+        var docLastRow = docSheet.getLastRow();
+        if (docLastRow < 2) return;
+
+        // Read col A (Lead_ID) and col F (attendance_status)
+        var docData      = docSheet.getRange(2, 1, docLastRow - 1, 6).getValues();
+        var docUpdated   = 0;
+
+        docData.forEach(function(docRow) {
+          var leadId    = String(docRow[0]).trim(); // col A
+          var docAttend = String(docRow[5]).trim(); // col F
+
+          if (!leadId || !docAttend) return;
+
+          var crmEntry = leadMap.get(leadId);
+          if (!crmEntry)                            return; // not in CRM
+          if (crmEntry.attendStatus === docAttend)  return; // unchanged
+
+          updates.push({ sheetRow: crmEntry.sheetRow, newStatus: docAttend });
+          crmEntry.attendStatus = docAttend; // prevent double-write from another doctor
+          docUpdated++;
+        });
+
+        logToSheet('syncAttendanceFromDoctors',
+          'Read ' + docUpdated + ' update(s) from "' + doctorName + '"', 'OK');
+
+      } catch (docErr) {
+        logToSheet('syncAttendanceFromDoctors',
+          'Error reading "' + doctorName + '": ' + docErr.message, 'ERROR');
+      }
+    });
+
+    // ----------------------------------------------------------
+    // 4. Write all attendance updates to CRM col M in one pass
+    // ----------------------------------------------------------
+    updates.forEach(function(upd) {
+      crmSheet.getRange(upd.sheetRow, CONFIG.COL.ATTENDANCE_STATUS)
+              .setValue(upd.newStatus);
+      totalUpdated++;
+    });
+
+    SpreadsheetApp.flush();
+
+    var summary = 'Sync complete — ' + totalUpdated + ' CRM attendance(s) updated';
+    logToSheet('syncAttendanceFromDoctors', summary, 'OK');
+    Logger.log('syncAttendanceFromDoctors: ' + summary);
+
+  } catch (e) {
+    logToSheet('syncAttendanceFromDoctors', e.message, 'ERROR');
+    Logger.log('syncAttendanceFromDoctors ERROR: ' + e.message);
+  }
 }
 
 // ------------------------------------------------------------
