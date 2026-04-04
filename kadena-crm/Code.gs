@@ -1085,3 +1085,355 @@ function setupAllTriggers() {
   logToSheet('setupAllTriggers', 'Triggers set up successfully', 'OK');
   Logger.log('setupAllTriggers: 4 triggers created successfully');
 }
+
+// ------------------------------------------------------------
+// DASHBOARD FUNCTION
+// ------------------------------------------------------------
+
+/**
+ * Rebuilds the Dashboard tab from scratch with three sections of
+ * COUNTIFS/AVERAGEIFS formulas that all reference the CRM sheet live.
+ *
+ * Section A — Overall Summary        (header: #1a73e8 blue)
+ * Section B — By Platform            (header: #34a853 green)
+ * Section C — By Doctor              (header: #673ab7 purple)
+ *
+ * Safe to re-run: the tab is fully cleared before writing.
+ * Unique doctor names are read from CRM column H at build time;
+ * re-run this function whenever the doctor roster changes.
+ */
+function setupDashboard() {
+  var crmSS   = SpreadsheetApp.openById(CONFIG.CRM_SPREADSHEET_ID);
+  var dash    = getOrCreateSheet(crmSS, CONFIG.DASHBOARD_SHEET);
+  var crmName = CONFIG.CRM_SHEET; // used inside formula strings
+
+  // ----------------------------------------------------------
+  // Shared style helpers
+  // ----------------------------------------------------------
+  var BLUE   = '#1a73e8';
+  var GREEN  = '#34a853';
+  var PURPLE = '#673ab7';
+  var WHITE  = '#ffffff';
+  var LABEL_BG  = '#f8f9fa';
+  var VALUE_BG  = '#ffffff';
+  var BORDER_COLOR = '#dadce0';
+
+  function styleHeader(range, bg) {
+    range.setBackground(bg)
+         .setFontColor(WHITE)
+         .setFontWeight('bold')
+         .setFontSize(11)
+         .setHorizontalAlignment('center');
+  }
+
+  function styleLabel(range) {
+    range.setBackground(LABEL_BG)
+         .setFontWeight('bold')
+         .setFontSize(10)
+         .setHorizontalAlignment('right');
+  }
+
+  function styleValue(range) {
+    range.setBackground(VALUE_BG)
+         .setFontSize(10)
+         .setHorizontalAlignment('center');
+  }
+
+  function applyBorders(range) {
+    range.setBorder(true, true, true, true, true, true,
+                    BORDER_COLOR, SpreadsheetApp.BorderStyle.SOLID);
+  }
+
+  // ----------------------------------------------------------
+  // 0. Clear everything and set column widths
+  // ----------------------------------------------------------
+  dash.clearContents();
+  dash.clearFormats();
+  dash.setFrozenRows(0);
+
+  dash.setColumnWidth(1, 30);   // A — spacer
+  dash.setColumnWidth(2, 200);  // B — label / platform / doctor
+  dash.setColumnWidth(3, 110);  // C
+  dash.setColumnWidth(4, 110);  // D
+  dash.setColumnWidth(5, 110);  // E
+  dash.setColumnWidth(6, 110);  // F
+  dash.setColumnWidth(7, 110);  // G
+  dash.setColumnWidth(8, 130);  // H — conversion %
+
+  // ----------------------------------------------------------
+  // Reusable COUNTIFS snippet builders
+  // Formula column references (1-based → letter):
+  //   K = lead_status   H = doctor_name   F = platform
+  // ----------------------------------------------------------
+  var STATUS_COL    = 'K';  // lead_status
+  var PLATFORM_COL  = 'F';  // platform
+  var DOCTOR_COL    = 'H';  // doctor_name
+  var RESPONSE_COL  = 'M';  // response_time_hours
+  var DATA_RANGE    = "'" + crmName + "'!{COL}:{COL}";
+
+  function colRange(col) {
+    return "'" + crmName + "'!" + col + ":" + col;
+  }
+
+  // COUNTIF for a specific status
+  function countStatus(status) {
+    return 'COUNTIF(' + colRange(STATUS_COL) + ',"' + status + '")';
+  }
+
+  // COUNTIFS platform + status
+  function countPlatformStatus(platform, status) {
+    return 'COUNTIFS('
+      + colRange(PLATFORM_COL) + ',"' + platform + '",'
+      + colRange(STATUS_COL)   + ',"' + status   + '"'
+      + ')';
+  }
+
+  // COUNTIF platform (total)
+  function countPlatform(platform) {
+    return 'COUNTIF(' + colRange(PLATFORM_COL) + ',"' + platform + '")';
+  }
+
+  // COUNTIFS doctor + status
+  function countDoctorStatus(doctorCell, status) {
+    // doctorCell is a sheet reference like "B25" so we can drag/update easily
+    return 'COUNTIFS('
+      + colRange(DOCTOR_COL) + ',' + doctorCell + ','
+      + colRange(STATUS_COL) + ',"' + status + '"'
+      + ')';
+  }
+
+  // COUNTIF doctor (total)
+  function countDoctor(doctorCell) {
+    return 'COUNTIF(' + colRange(DOCTOR_COL) + ',' + doctorCell + ')';
+  }
+
+  // Conversion rate % formula: booked / total  (avoids div-by-zero)
+  function convRate(bookedCell, totalCell) {
+    return 'IF(' + totalCell + '=0,"—",'
+         + 'TEXT(' + bookedCell + '/' + totalCell + ',"0.0%"))';
+  }
+
+  // ----------------------------------------------------------
+  // 1. Read unique doctor names from CRM column H now
+  //    (needed to build Section C row count before writing)
+  // ----------------------------------------------------------
+  var crmSheet  = crmSS.getSheetByName(crmName);
+  var lastRow   = crmSheet.getLastRow();
+  var doctors   = [];
+
+  if (lastRow > 1) {
+    var hVals = crmSheet.getRange(2, 8, lastRow - 1, 1).getValues(); // col H
+    var seen  = {};
+    hVals.forEach(function(r) {
+      var d = String(r[0]).trim();
+      if (d && d !== 'unknown' && !seen[d]) {
+        seen[d] = true;
+        doctors.push(d);
+      }
+    });
+    doctors.sort();
+  }
+
+  // ----------------------------------------------------------
+  // Helper — write a single row and return the next row number
+  // ----------------------------------------------------------
+  var currentRow = 2; // start at row 2 — leave row 1 as breathing room
+
+  // ===========================================================
+  // SECTION A — Overall Summary
+  // ===========================================================
+
+  // A1: section header spanning B:H
+  var aHeaderRange = dash.getRange(currentRow, 2, 1, 7);
+  aHeaderRange.merge()
+              .setValue('📊  ملخص عام  —  Overall Summary');
+  styleHeader(aHeaderRange, BLUE);
+  applyBorders(aHeaderRange);
+  currentRow++;
+
+  // Column headers
+  var aColHeaders = ['المؤشر', 'القيمة', '', '', '', '', ''];
+  dash.getRange(currentRow, 2, 1, 7).setValues([aColHeaders]);
+  styleLabel(dash.getRange(currentRow, 2));
+  styleValue(dash.getRange(currentRow, 3));
+  currentRow++;
+
+  // Data rows  [ label , formula ]
+  var summaryRows = [
+    ['إجمالي الليدز — Total Leads',
+     '=COUNTA(' + colRange('A') + ')-1'],
+
+    ['تم الاتصال — Contacted',
+     '=' + countStatus('تم الاتصال')],
+
+    ['تم الحجز — Booked',
+     '=' + countStatus('تم الحجز')],
+
+    ['حضر — Showed Up',
+     '=' + countStatus('حضر')],
+
+    ['تحول لعميل — Converted',
+     '=' + countStatus('اتحول لعميل')],
+
+    ['متوسط وقت الاستجابة (ساعة) — Avg Response Hrs',
+     '=IFERROR(AVERAGEIF(' + colRange(RESPONSE_COL) + ',">0"' + '),"—")']
+  ];
+
+  summaryRows.forEach(function(pair) {
+    var labelCell = dash.getRange(currentRow, 2);
+    var valueCell = dash.getRange(currentRow, 3);
+    labelCell.setValue(pair[0]);
+    valueCell.setFormula(pair[1]);
+    styleLabel(labelCell);
+    styleValue(valueCell);
+    applyBorders(dash.getRange(currentRow, 2, 1, 7));
+    currentRow++;
+  });
+
+  currentRow++; // blank spacer row
+
+  // ===========================================================
+  // SECTION B — By Platform
+  // ===========================================================
+
+  var bHeaderRange = dash.getRange(currentRow, 2, 1, 7);
+  bHeaderRange.merge()
+              .setValue('📱  حسب المنصة  —  By Platform');
+  styleHeader(bHeaderRange, GREEN);
+  applyBorders(bHeaderRange);
+  currentRow++;
+
+  // Column headers
+  var bColHeaders = ['Platform', 'Total', 'Contacted', 'Booked', 'Showed', 'Converted', 'Conversion %'];
+  dash.getRange(currentRow, 2, 1, 7).setValues([bColHeaders]);
+  styleHeader(dash.getRange(currentRow, 2, 1, 7), '#188038'); // darker green for sub-header
+  applyBorders(dash.getRange(currentRow, 2, 1, 7));
+  currentRow++;
+
+  var platforms = ['Meta', 'Snapchat', 'TikTok'];
+
+  platforms.forEach(function(platform) {
+    var totalCell   = 'C' + currentRow;
+    var bookedCell  = 'E' + currentRow;
+
+    var rowData = [
+      platform,
+      '=' + countPlatform(platform),
+      '=' + countPlatformStatus(platform, 'تم الاتصال'),
+      '=' + countPlatformStatus(platform, 'تم الحجز'),
+      '=' + countPlatformStatus(platform, 'حضر'),
+      '=' + countPlatformStatus(platform, 'اتحول لعميل'),
+      '=' + convRate(bookedCell, totalCell)
+    ];
+
+    var rowRange = dash.getRange(currentRow, 2, 1, 7);
+    rowRange.setValues([rowData]);
+    styleLabel(dash.getRange(currentRow, 2));
+    styleValue(dash.getRange(currentRow, 3, 1, 6));
+    applyBorders(rowRange);
+    currentRow++;
+  });
+
+  // Platform totals row
+  var bTotalRowStart = currentRow - platforms.length; // first platform data row
+  var bTotalRowEnd   = currentRow - 1;
+
+  var bTotals = [
+    'الإجمالي — Total',
+    '=SUM(C' + bTotalRowStart + ':C' + bTotalRowEnd + ')',
+    '=SUM(D' + bTotalRowStart + ':D' + bTotalRowEnd + ')',
+    '=SUM(E' + bTotalRowStart + ':E' + bTotalRowEnd + ')',
+    '=SUM(F' + bTotalRowStart + ':F' + bTotalRowEnd + ')',
+    '=SUM(G' + bTotalRowStart + ':G' + bTotalRowEnd + ')',
+    '=' + convRate('E' + currentRow, 'C' + currentRow)
+  ];
+  var bTotalsRange = dash.getRange(currentRow, 2, 1, 7);
+  bTotalsRange.setValues([bTotals]);
+  bTotalsRange.setFontWeight('bold').setBackground('#e6f4ea');
+  applyBorders(bTotalsRange);
+  currentRow++;
+
+  currentRow++; // blank spacer row
+
+  // ===========================================================
+  // SECTION C — By Doctor
+  // ===========================================================
+
+  var cHeaderRange = dash.getRange(currentRow, 2, 1, 7);
+  cHeaderRange.merge()
+              .setValue('👨‍⚕️  حسب الطبيب  —  By Doctor');
+  styleHeader(cHeaderRange, PURPLE);
+  applyBorders(cHeaderRange);
+  currentRow++;
+
+  // Column headers
+  var cColHeaders = ['Doctor', 'Total Leads', 'Booked', 'Conversion %', '', '', ''];
+  dash.getRange(currentRow, 2, 1, 7).setValues([cColHeaders]);
+  styleHeader(dash.getRange(currentRow, 2, 1, 4), '#4527a0'); // darker purple
+  dash.getRange(currentRow, 6, 1, 3).setBackground(WHITE);
+  applyBorders(dash.getRange(currentRow, 2, 1, 4));
+  currentRow++;
+
+  if (doctors.length === 0) {
+    // Placeholder when no doctor data exists yet
+    var placeholderRange = dash.getRange(currentRow, 2, 1, 4);
+    placeholderRange.merge()
+                    .setValue('لا توجد بيانات حتى الآن — No data yet')
+                    .setFontColor('#999999')
+                    .setHorizontalAlignment('center');
+    applyBorders(placeholderRange);
+    currentRow++;
+  } else {
+    doctors.forEach(function(doctor) {
+      // Write the doctor name in col B so formulas can reference it
+      // — avoids hard-coding Arabic/mixed strings inside COUNTIFS
+      var doctorLabelCell = 'B' + currentRow;
+      var totalCell       = 'C' + currentRow;
+      var bookedCell      = 'D' + currentRow;
+
+      var rowData = [
+        doctor,
+        '=' + countDoctor(doctorLabelCell),
+        '=' + countDoctorStatus(doctorLabelCell, 'تم الحجز'),
+        '=' + convRate(bookedCell, totalCell),
+        '', '', ''
+      ];
+
+      var rowRange = dash.getRange(currentRow, 2, 1, 7);
+      rowRange.setValues([rowData]);
+      styleLabel(dash.getRange(currentRow, 2));
+      styleValue(dash.getRange(currentRow, 3, 1, 2));
+      dash.getRange(currentRow, 5, 1, 3).setBackground(WHITE);
+      applyBorders(dash.getRange(currentRow, 2, 1, 4));
+      currentRow++;
+    });
+
+    // Doctor totals row
+    var cTotalRowStart = currentRow - doctors.length;
+    var cTotalRowEnd   = currentRow - 1;
+
+    var cTotals = [
+      'الإجمالي — Total',
+      '=SUM(C' + cTotalRowStart + ':C' + cTotalRowEnd + ')',
+      '=SUM(D' + cTotalRowStart + ':D' + cTotalRowEnd + ')',
+      '=' + convRate('D' + currentRow, 'C' + currentRow),
+      '', '', ''
+    ];
+    var cTotalsRange = dash.getRange(currentRow, 2, 1, 7);
+    cTotalsRange.setValues([cTotals]);
+    dash.getRange(currentRow, 2, 1, 4)
+        .setFontWeight('bold')
+        .setBackground('#ede7f6');
+    dash.getRange(currentRow, 6, 1, 3).setBackground(WHITE);
+    applyBorders(dash.getRange(currentRow, 2, 1, 4));
+    currentRow++;
+  }
+
+  // ----------------------------------------------------------
+  // Final: freeze nothing, flush
+  // ----------------------------------------------------------
+  SpreadsheetApp.flush();
+
+  logToSheet('setupDashboard', 'Dashboard built with ' + doctors.length + ' doctor(s)', 'OK');
+  Logger.log('setupDashboard: complete — ' + doctors.length + ' doctor(s) in Section C');
+}
