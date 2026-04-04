@@ -1321,12 +1321,66 @@ function syncBookedToDoctors() {
       try {
         var doctorKey = doctorName.toLowerCase();
 
-        // Get or create the per-doctor tab
-        var docSheet  = getOrCreateSheet(ss, doctorName);
-        var isNew     = docSheet.getLastRow() === 0;
+        // --------------------------------------------------
+        // Load existing Lead_IDs only if the tab already exists
+        // (don't create it yet — we create ONLY if there are rows)
+        // --------------------------------------------------
+        var existingIds = new Set();
+        var docSheet    = ss.getSheetByName(doctorName); // null if doesn't exist
 
-        if (isNew) {
-          // Write headers
+        if (docSheet && docSheet.getLastRow() > 1) {
+          docSheet.getRange(2, 1, docSheet.getLastRow() - 1, 1).getValues()
+            .forEach(function(r) {
+              var id = String(r[0]).trim();
+              if (id) existingIds.add(id);
+            });
+        }
+
+        // --------------------------------------------------
+        // Find matching CRM rows: booked + this doctor + not already in tab
+        // --------------------------------------------------
+        var rowsToAppend = [];
+
+        crmData.forEach(function(row) {
+          var crmDoctor     = String(row[COL.DOCTOR_NAME]).trim().toLowerCase();
+          var bookingStatus = String(row[COL.BOOKING_STATUS]).trim();
+          var leadId        = String(row[COL.LEAD_ID]).trim();
+
+          if (crmDoctor !== doctorKey)       return;
+          if (bookingStatus !== 'تم الحجز') return;
+          if (!leadId)                       return;
+          if (existingIds.has(leadId))       return;
+
+          var bookingDate = row[COL.FIRST_CONTACT] || '';
+
+          rowsToAppend.push([
+            leadId,
+            row[COL.FULL_NAME],
+            row[COL.PHONE],
+            row[COL.SERVICE_NAME],
+            bookingDate,
+            row[COL.ATTENDANCE_STATUS] || '',
+            row[COL.NOTES]             || ''
+          ]);
+
+          existingIds.add(leadId);
+        });
+
+        // --------------------------------------------------
+        // Nothing to write → skip entirely (don't create empty tab)
+        // --------------------------------------------------
+        if (rowsToAppend.length === 0) {
+          Logger.log('syncBookedToDoctors: no new booked leads for "' + doctorName + '" — skipping');
+          return;
+        }
+
+        // --------------------------------------------------
+        // NOW create or open the tab (guaranteed to have data)
+        // --------------------------------------------------
+        var isNew = !docSheet || docSheet.getLastRow() === 0;
+        if (!docSheet) docSheet = ss.insertSheet(doctorName);
+
+        if (isNew || docSheet.getLastRow() === 0) {
           var hRange = docSheet.getRange(1, 1, 1, DOC_HEADERS.length);
           hRange.setValues([DOC_HEADERS]);
           hRange.setBackground(HEADER_BG)
@@ -1334,9 +1388,7 @@ function syncBookedToDoctors() {
                 .setFontWeight('bold');
           docSheet.setFrozenRows(1);
 
-          // Attendance dropdown on col F (column 6), whole column
-          var maxRows = docSheet.getMaxRows() - 1;
-          docSheet.getRange(2, 6, maxRows, 1)
+          docSheet.getRange(2, 6, docSheet.getMaxRows() - 1, 1)
             .setDataValidation(
               SpreadsheetApp.newDataValidation()
                 .requireValueInList(ATTEND_VALUES, true)
@@ -1344,61 +1396,17 @@ function syncBookedToDoctors() {
                 .build()
             );
 
-          // Column widths
           [1,2,3,4,5,6,7].forEach(function(c, i) {
-            var widths = [130, 160, 120, 140, 130, 140, 180];
-            docSheet.setColumnWidth(c, widths[i]);
+            docSheet.setColumnWidth(c, [130,160,120,140,130,140,180][i]);
           });
         }
 
-        // Load existing Lead_IDs from doctor tab col A
-        var existingIds = new Set();
-        var docLastRow  = docSheet.getLastRow();
-
-        if (docLastRow > 1) {
-          docSheet.getRange(2, 1, docLastRow - 1, 1).getValues()
-            .forEach(function(r) {
-              var id = String(r[0]).trim();
-              if (id) existingIds.add(id);
-            });
-        }
-
-        // Find matching CRM rows: booked + this doctor + not already synced
-        var rowsToAppend = [];
-
-        crmData.forEach(function(row) {
-          var crmDoctor      = String(row[COL.DOCTOR_NAME]).trim().toLowerCase();
-          var bookingStatus  = String(row[COL.BOOKING_STATUS]).trim();
-          var leadId         = String(row[COL.LEAD_ID]).trim();
-
-          if (crmDoctor !== doctorKey)       return;
-          if (bookingStatus !== 'تم الحجز') return;
-          if (!leadId)                       return;
-          if (existingIds.has(leadId))       return;
-
-          // booking_date = first_contact_time (best proxy available)
-          var bookingDate = row[COL.FIRST_CONTACT] || '';
-
-          rowsToAppend.push([
-            leadId,                              // A Lead_ID
-            row[COL.FULL_NAME],                  // B full_name
-            row[COL.PHONE],                      // C phone
-            row[COL.SERVICE_NAME],               // D service_name
-            bookingDate,                         // E booking_date
-            row[COL.ATTENDANCE_STATUS] || '',    // F attendance_status
-            row[COL.NOTES]             || ''     // G notes
-          ]);
-
-          existingIds.add(leadId); // prevent duplicates within same batch
-        });
-
-        // Append new rows in one batch
-        if (rowsToAppend.length > 0) {
-          var writeStart = docSheet.getLastRow() + 1;
-          docSheet
-            .getRange(writeStart, 1, rowsToAppend.length, 7)
-            .setValues(rowsToAppend);
-        }
+        // --------------------------------------------------
+        // Append rows in one batch
+        // --------------------------------------------------
+        var writeStart = docSheet.getLastRow() + 1;
+        docSheet.getRange(writeStart, 1, rowsToAppend.length, 7)
+                .setValues(rowsToAppend);
 
         var msg = 'Synced ' + rowsToAppend.length + ' booked lead(s) to tab "' + doctorName + '"';
         logToSheet('syncBookedToDoctors', msg, 'OK');
