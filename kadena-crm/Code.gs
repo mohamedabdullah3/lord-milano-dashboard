@@ -44,7 +44,7 @@ const CONFIG = {
   // Dropdown values for each status column
   CONTACT_STATUS_VALUES:    ['جديد', 'تم التواصل', 'لم يتم التواصل'],
   BOOKING_STATUS_VALUES:    ['لم يتم الرد', 'استفسار', 'تم الحجز'],
-  ATTENDANCE_STATUS_VALUES: ['حاضر', 'لم يحضر', 'إعادة جدولة']
+  ATTENDANCE_STATUS_VALUES: ['حضر', 'لم يحضر', 'إعادة جدولة']
 };
 
 // ------------------------------------------------------------
@@ -959,7 +959,7 @@ function sendDailyReport() {
     var totalContacted  = 0;   // contact_status = "تم التواصل"
     var totalNoContact  = 0;   // contact_status = "لم يتم التواصل"
     var totalBooked     = 0;   // booking_status = "تم الحجز"
-    var totalShowed     = 0;   // attendance_status = "حاضر"
+    var totalShowed     = 0;   // attendance_status = "حضر"
     var totalNoShow     = 0;   // attendance_status = "لم يحضر"
     var totalReschedule = 0;   // attendance_status = "إعادة جدولة"
 
@@ -991,7 +991,7 @@ function sendDailyReport() {
       if (contactStatus === 'تم التواصل')    totalContacted++;
       if (contactStatus === 'لم يتم التواصل') totalNoContact++;
       if (bookingStatus  === 'تم الحجز')      totalBooked++;
-      if (attendStatus   === 'حاضر')          totalShowed++;
+      if (attendStatus   === 'حضر')            totalShowed++;
       if (attendStatus   === 'لم يحضر')       totalNoShow++;
       if (attendStatus   === 'إعادة جدولة')   totalReschedule++;
     });
@@ -1186,13 +1186,14 @@ function setupDashboard() {
   var crmName = CONFIG.CRM_SHEET;
 
   // ----------------------------------------------------------
-  // Shared style helpers
+  // Style helpers
   // ----------------------------------------------------------
-  var BLUE         = '#1a73e8';
-  var GREEN        = '#34a853';
-  var PURPLE       = '#673ab7';
+  var BLUE_DARK    = '#1a73e8';
+  var GREEN_DARK   = '#137333';
+  var ORANGE_DARK  = '#e37400';
   var WHITE        = '#ffffff';
   var LABEL_BG     = '#f8f9fa';
+  var TOTALS_BG    = '#e8f0fe';
   var BORDER_COLOR = '#dadce0';
 
   function styleHeader(range, bg) {
@@ -1200,7 +1201,7 @@ function setupDashboard() {
          .setFontWeight('bold').setFontSize(11)
          .setHorizontalAlignment('center');
   }
-  function styleSubHeader(range, bg) {
+  function styleColHeaders(range, bg) {
     range.setBackground(bg).setFontColor(WHITE)
          .setFontWeight('bold').setFontSize(10)
          .setHorizontalAlignment('center');
@@ -1213,334 +1214,269 @@ function setupDashboard() {
     range.setBackground(WHITE).setFontSize(10)
          .setHorizontalAlignment('center');
   }
+  function styleTotals(range, bg) {
+    range.setBackground(bg || TOTALS_BG)
+         .setFontWeight('bold').setFontSize(10)
+         .setHorizontalAlignment('center');
+  }
   function applyBorders(range) {
     range.setBorder(true, true, true, true, true, true,
                     BORDER_COLOR, SpreadsheetApp.BorderStyle.SOLID);
   }
+  function pct(numeratorCell, denominatorCell) {
+    // Returns a formula string: numerator/denominator as %, or — if zero
+    return 'IF(' + denominatorCell + '=0,"—",'
+         + 'TEXT(' + numeratorCell + '/' + denominatorCell + ',"0.0%"))';
+  }
 
   // ----------------------------------------------------------
-  // 0. Clear and set column widths
-  //    Sections span cols B–I (8 data cols) to fit 3-status tables
+  // CRM column letters
+  // ----------------------------------------------------------
+  var F_PLATFORM  = 'F';   // platform
+  var K_CONTACT   = 'K';   // contact_status
+  var L_BOOKING   = 'L';   // booking_status
+  var M_ATTEND    = 'M';   // attendance_status
+  var O_RESPONSE  = 'O';   // response_time_hours
+
+  function cr(col) {
+    // Returns a full-column range string for use inside formulas
+    return "'" + crmName + "'!" + col + ":" + col;
+  }
+  function countPlat(platform) {
+    return 'COUNTIF(' + cr(F_PLATFORM) + ',"' + platform + '")';
+  }
+  function countPlatVal(platform, col, val) {
+    return 'COUNTIFS(' + cr(F_PLATFORM) + ',"' + platform + '",'
+                       + cr(col)        + ',"' + val       + '")';
+  }
+  function avgResponsePlat(platform) {
+    // Average response hours for this platform where value > 0
+    return 'IFERROR(AVERAGEIFS(' + cr(O_RESPONSE) + ','
+                                 + cr(F_PLATFORM)  + ',"' + platform + '",'
+                                 + cr(O_RESPONSE)  + ',">0"),"—")';
+  }
+
+  // ----------------------------------------------------------
+  // Clear and configure columns
+  // Section 1 & 2 use 8 cols (B–I): label + 7 data cols
   // ----------------------------------------------------------
   dash.clearContents();
   dash.clearFormats();
   dash.setFrozenRows(0);
 
-  dash.setColumnWidth(1, 30);   // A — spacer
-  dash.setColumnWidth(2, 190);  // B — label / platform / doctor
-  dash.setColumnWidth(3, 90);   // C
-  dash.setColumnWidth(4, 120);  // D
-  dash.setColumnWidth(5, 120);  // E
-  dash.setColumnWidth(6, 120);  // F
-  dash.setColumnWidth(7, 120);  // G
-  dash.setColumnWidth(8, 120);  // H
-  dash.setColumnWidth(9, 110);  // I — rate %
+  dash.setColumnWidth(1, 20);   // A spacer
+  dash.setColumnWidth(2, 175);  // B platform / label
+  dash.setColumnWidth(3, 100);  // C إجمالي الليدز
+  dash.setColumnWidth(4, 115);  // D تم التواصل / % رد
+  dash.setColumnWidth(5, 115);  // E تم الحجز   / % تحويل
+  dash.setColumnWidth(6, 100);  // F حضر        / % حضور
+  dash.setColumnWidth(7, 135);  // G اتحول لعميل / متوسط وقت الرد
+  dash.setColumnWidth(8, 130);  // H Conversion Rate%
 
-  // ----------------------------------------------------------
-  // Formula helpers — column letters match new CRM layout
-  // ----------------------------------------------------------
-  var CONTACT_COL  = 'K';  // contact_status
-  var BOOKING_COL  = 'L';  // booking_status
-  var ATTEND_COL   = 'M';  // attendance_status
-  var PLATFORM_COL = 'F';
-  var DOCTOR_COL   = 'H';
-  var RESPONSE_COL = 'O';  // response_time_hours (was M)
+  var SPAN      = 7;         // number of data columns (B–H)
+  var platforms = ['Meta', 'Snapchat', 'TikTok'];
 
-  function colRange(col) {
-    return "'" + crmName + "'!" + col + ":" + col;
-  }
-  // COUNTIF value in a specific CRM column
-  function countIn(crmCol, value) {
-    return 'COUNTIF(' + colRange(crmCol) + ',"' + value + '")';
-  }
-  // COUNTIFS platform + value in a specific CRM column
-  function countPlatformIn(platform, crmCol, value) {
-    return 'COUNTIFS('
-      + colRange(PLATFORM_COL) + ',"' + platform + '",'
-      + colRange(crmCol)       + ',"' + value    + '"'
-      + ')';
-  }
-  // COUNTIF platform total
-  function countPlatform(platform) {
-    return 'COUNTIF(' + colRange(PLATFORM_COL) + ',"' + platform + '")';
-  }
-  // COUNTIFS doctor (cell ref) + value in a specific CRM column
-  function countDoctorIn(doctorCell, crmCol, value) {
-    return 'COUNTIFS('
-      + colRange(DOCTOR_COL) + ',' + doctorCell + ','
-      + colRange(crmCol)     + ',"' + value + '"'
-      + ')';
-  }
-  // COUNTIF doctor total
-  function countDoctor(doctorCell) {
-    return 'COUNTIF(' + colRange(DOCTOR_COL) + ',' + doctorCell + ')';
-  }
-  // Rate %: bookedCell / totalCell, avoids div-by-zero
-  function rate(bookedCell, totalCell) {
-    return 'IF(' + totalCell + '=0,"—",TEXT(' + bookedCell + '/' + totalCell + ',"0.0%"))';
-  }
-
-  // ----------------------------------------------------------
-  // 1. Read unique doctor names from CRM col H
-  // ----------------------------------------------------------
-  var crmSheet = crmSS.getSheetByName(crmName);
-  var lastRow  = crmSheet.getLastRow();
-  var doctors  = [];
-
-  if (lastRow > 1) {
-    var hVals = crmSheet.getRange(2, 8, lastRow - 1, 1).getValues();
-    var seen  = {};
-    hVals.forEach(function(r) {
-      var d = String(r[0]).trim();
-      if (d && d !== 'unknown' && !seen[d]) { seen[d] = true; doctors.push(d); }
-    });
-    doctors.sort();
-  }
-
-  var currentRow = 2; // row 1 left as breathing room
+  var currentRow = 2; // row 1 = breathing room
 
   // ===========================================================
-  // SECTION A — Overall Summary  (blue, cols B:I)
+  // SECTION 1 — أداء المنصات
+  // Cols: المنصة | إجمالي الليدز | تم التواصل | تم الحجز |
+  //       حضر | اتحول لعميل | Conversion Rate%
   // ===========================================================
-  var aSpan = 8; // cols B–I
-
-  dash.getRange(currentRow, 2, 1, aSpan).merge()
-      .setValue('📊  ملخص عام  —  Overall Summary');
-  styleHeader(dash.getRange(currentRow, 2, 1, aSpan), BLUE);
-  applyBorders(dash.getRange(currentRow, 2, 1, aSpan));
+  dash.getRange(currentRow, 2, 1, SPAN).merge()
+      .setValue('📊  أداء المنصات');
+  styleHeader(dash.getRange(currentRow, 2, 1, SPAN), BLUE_DARK);
+  applyBorders(dash.getRange(currentRow, 2, 1, SPAN));
   currentRow++;
 
-  // Sub-header row
-  dash.getRange(currentRow, 2, 1, aSpan)
-      .setValues([['المؤشر', 'القيمة', '', '', '', '', '', '']]);
-  styleLabel(dash.getRange(currentRow, 2));
-  styleValue(dash.getRange(currentRow, 3));
-  currentRow++;
-
-  // --- Totals & response time ---
-  var aSummary1 = [
-    ['إجمالي الليدز — Total Leads',
-     '=COUNTA(' + colRange('A') + ')-1'],
-    ['متوسط وقت الاستجابة (ساعة) — Avg Response Hrs',
-     '=IFERROR(AVERAGEIF(' + colRange(RESPONSE_COL) + ',">0"),"—")']
+  // Column headers
+  var s1Headers = [
+    'المنصة', 'إجمالي الليدز', 'تم التواصل',
+    'تم الحجز', 'حضر', 'اتحول لعميل', 'Conversion Rate%'
   ];
-  aSummary1.forEach(function(pair) {
-    dash.getRange(currentRow, 2).setValue(pair[0]);
-    dash.getRange(currentRow, 3).setFormula(pair[1]);
-    styleLabel(dash.getRange(currentRow, 2));
-    styleValue(dash.getRange(currentRow, 3));
-    applyBorders(dash.getRange(currentRow, 2, 1, aSpan));
-    currentRow++;
-  });
-
-  // --- contact_status group ---
-  dash.getRange(currentRow, 2, 1, aSpan).merge()
-      .setValue('حالة التواصل — Contact Status');
-  styleSubHeader(dash.getRange(currentRow, 2, 1, aSpan), '#1557b0');
-  applyBorders(dash.getRange(currentRow, 2, 1, aSpan));
+  dash.getRange(currentRow, 2, 1, SPAN).setValues([s1Headers]);
+  styleColHeaders(dash.getRange(currentRow, 2, 1, SPAN), '#1557b0');
+  applyBorders(dash.getRange(currentRow, 2, 1, SPAN));
   currentRow++;
 
-  [['جديد',              countIn(CONTACT_COL, 'جديد')],
-   ['تم التواصل',        countIn(CONTACT_COL, 'تم التواصل')],
-   ['لم يتم التواصل',   countIn(CONTACT_COL, 'لم يتم التواصل')]
-  ].forEach(function(pair) {
-    dash.getRange(currentRow, 2).setValue(pair[0]);
-    dash.getRange(currentRow, 3).setFormula('=' + pair[1]);
+  // Data rows — one per platform
+  var s1DataStart = currentRow;
+  platforms.forEach(function(p) {
+    // Conversion Rate% = تم الحجز / إجمالي الليدز
+    var totalCell  = 'C' + currentRow;
+    var bookedCell = 'E' + currentRow;
+
+    var rowData = [
+      p,
+      '=' + countPlat(p),
+      '=' + countPlatVal(p, K_CONTACT, 'تم التواصل'),
+      '=' + countPlatVal(p, L_BOOKING, 'تم الحجز'),
+      '=' + countPlatVal(p, M_ATTEND,  'حضر'),
+      '=' + countPlatVal(p, M_ATTEND,  'اتحول لعميل'),
+      '=' + pct(bookedCell, totalCell)
+    ];
+    dash.getRange(currentRow, 2, 1, SPAN).setValues([rowData]);
     styleLabel(dash.getRange(currentRow, 2));
-    styleValue(dash.getRange(currentRow, 3));
-    applyBorders(dash.getRange(currentRow, 2, 1, aSpan));
+    styleValue(dash.getRange(currentRow, 3, 1, SPAN - 1));
+    applyBorders(dash.getRange(currentRow, 2, 1, SPAN));
     currentRow++;
   });
 
-  // --- booking_status group ---
-  dash.getRange(currentRow, 2, 1, aSpan).merge()
-      .setValue('حالة الحجز — Booking Status');
-  styleSubHeader(dash.getRange(currentRow, 2, 1, aSpan), '#137333');
-  applyBorders(dash.getRange(currentRow, 2, 1, aSpan));
+  // Totals row
+  var s1End = currentRow - 1;
+  var s1Totals = ['الإجمالي'];
+  ['C','D','E','F','G'].forEach(function(col) {
+    s1Totals.push('=SUM(' + col + s1DataStart + ':' + col + s1End + ')');
+  });
+  s1Totals.push('=' + pct('E' + currentRow, 'C' + currentRow));
+  dash.getRange(currentRow, 2, 1, SPAN).setValues([s1Totals]);
+  styleTotals(dash.getRange(currentRow, 2, 1, SPAN), '#dae8fc');
+  dash.getRange(currentRow, 2).setHorizontalAlignment('right');
+  applyBorders(dash.getRange(currentRow, 2, 1, SPAN));
   currentRow++;
-
-  [['لم يتم الرد',  countIn(BOOKING_COL, 'لم يتم الرد')],
-   ['استفسار',       countIn(BOOKING_COL, 'استفسار')],
-   ['تم الحجز',      countIn(BOOKING_COL, 'تم الحجز')]
-  ].forEach(function(pair) {
-    dash.getRange(currentRow, 2).setValue(pair[0]);
-    dash.getRange(currentRow, 3).setFormula('=' + pair[1]);
-    styleLabel(dash.getRange(currentRow, 2));
-    styleValue(dash.getRange(currentRow, 3));
-    applyBorders(dash.getRange(currentRow, 2, 1, aSpan));
-    currentRow++;
-  });
-
-  // --- attendance_status group ---
-  dash.getRange(currentRow, 2, 1, aSpan).merge()
-      .setValue('حالة الحضور — Attendance Status');
-  styleSubHeader(dash.getRange(currentRow, 2, 1, aSpan), '#4527a0');
-  applyBorders(dash.getRange(currentRow, 2, 1, aSpan));
-  currentRow++;
-
-  [['حاضر',             countIn(ATTEND_COL, 'حاضر')],
-   ['لم يحضر',          countIn(ATTEND_COL, 'لم يحضر')],
-   ['إعادة جدولة',      countIn(ATTEND_COL, 'إعادة جدولة')]
-  ].forEach(function(pair) {
-    dash.getRange(currentRow, 2).setValue(pair[0]);
-    dash.getRange(currentRow, 3).setFormula('=' + pair[1]);
-    styleLabel(dash.getRange(currentRow, 2));
-    styleValue(dash.getRange(currentRow, 3));
-    applyBorders(dash.getRange(currentRow, 2, 1, aSpan));
-    currentRow++;
-  });
 
   currentRow++; // spacer
 
   // ===========================================================
-  // SECTION B — By Platform  (green, 3 sub-tables)
-  // Each sub-table: Platform | Total | val1 | val2 | val3 | Rate%
-  // cols B–H = 7 cols
+  // SECTION 2 — جودة الليدز
+  // Cols: المنصة | % رد على الاتصال | % تحويل لحجز |
+  //       % حضور | متوسط وقت الرد (ساعة)
   // ===========================================================
-  var bSpan     = 7;
-  var platforms = ['Meta', 'Snapchat', 'TikTok'];
+  var S2_SPAN = 5; // 5 columns: B–F
 
-  dash.getRange(currentRow, 2, 1, bSpan).merge()
-      .setValue('📱  حسب المنصة  —  By Platform');
-  styleHeader(dash.getRange(currentRow, 2, 1, bSpan), GREEN);
-  applyBorders(dash.getRange(currentRow, 2, 1, bSpan));
+  dash.getRange(currentRow, 2, 1, S2_SPAN).merge()
+      .setValue('📈  جودة الليدز');
+  styleHeader(dash.getRange(currentRow, 2, 1, S2_SPAN), GREEN_DARK);
+  applyBorders(dash.getRange(currentRow, 2, 1, S2_SPAN));
   currentRow++;
 
-  // Helper: render one platform sub-table
-  function renderPlatformSubTable(titleText, subBg, statusCol, colHeaders, statusValues) {
-    // sub-table title
-    dash.getRange(currentRow, 2, 1, bSpan).merge().setValue(titleText);
-    styleSubHeader(dash.getRange(currentRow, 2, 1, bSpan), subBg);
-    applyBorders(dash.getRange(currentRow, 2, 1, bSpan));
-    currentRow++;
-
-    // column headers
-    var hRow = ['Platform', 'Total'].concat(colHeaders).concat(['Rate %']);
-    dash.getRange(currentRow, 2, 1, bSpan).setValues([hRow]);
-    styleSubHeader(dash.getRange(currentRow, 2, 1, bSpan), subBg);
-    applyBorders(dash.getRange(currentRow, 2, 1, bSpan));
-    currentRow++;
-
-    var dataRowStart = currentRow;
-    platforms.forEach(function(p) {
-      var totalCell  = 'C' + currentRow;
-      // first status value = "positive" outcome for rate
-      var posCell    = 'D' + currentRow;
-      var rowData    = [p, '=' + countPlatform(p)];
-      statusValues.forEach(function(sv) {
-        rowData.push('=' + countPlatformIn(p, statusCol, sv));
-      });
-      rowData.push('=' + rate(posCell, totalCell));
-
-      dash.getRange(currentRow, 2, 1, bSpan).setValues([rowData]);
-      styleLabel(dash.getRange(currentRow, 2));
-      styleValue(dash.getRange(currentRow, 3, 1, bSpan - 1));
-      applyBorders(dash.getRange(currentRow, 2, 1, bSpan));
-      currentRow++;
-    });
-
-    // totals row
-    var s = dataRowStart, e = currentRow - 1;
-    var totRow = ['الإجمالي'];
-    for (var c = 3; c <= 3 + statusValues.length; c++) {
-      var letter = String.fromCharCode(64 + c); // C=3, D=4, …
-      totRow.push('=SUM(' + letter + s + ':' + letter + e + ')');
-    }
-    totRow.push('=' + rate('D' + currentRow, 'C' + currentRow));
-    dash.getRange(currentRow, 2, 1, bSpan).setValues([totRow]);
-    dash.getRange(currentRow, 2, 1, bSpan).setFontWeight('bold')
-        .setBackground('#e6f4ea');
-    applyBorders(dash.getRange(currentRow, 2, 1, bSpan));
-    currentRow++;
-    currentRow++; // spacer between sub-tables
-  }
-
-  renderPlatformSubTable(
-    'حالة التواصل',  '#1557b0', CONTACT_COL,
-    ['جديد', 'تم التواصل', 'لم يتم التواصل'],
-    ['جديد', 'تم التواصل', 'لم يتم التواصل']
-  );
-  renderPlatformSubTable(
-    'حالة الحجز',   '#137333', BOOKING_COL,
-    ['لم يتم الرد', 'استفسار', 'تم الحجز'],
-    ['لم يتم الرد', 'استفسار', 'تم الحجز']
-  );
-  renderPlatformSubTable(
-    'حالة الحضور',  '#4527a0', ATTEND_COL,
-    ['حاضر', 'لم يحضر', 'إعادة جدولة'],
-    ['حاضر', 'لم يحضر', 'إعادة جدولة']
-  );
-
-  // ===========================================================
-  // SECTION C — By Doctor  (purple)
-  // Doctor | Total | Contacted | Booked | Showed | Booking Rate%
-  // cols B–G = 6 cols
-  // ===========================================================
-  var cSpan = 6;
-
-  dash.getRange(currentRow, 2, 1, cSpan).merge()
-      .setValue('👨‍⚕️  حسب الطبيب  —  By Doctor');
-  styleHeader(dash.getRange(currentRow, 2, 1, cSpan), PURPLE);
-  applyBorders(dash.getRange(currentRow, 2, 1, cSpan));
+  var s2Headers = [
+    'المنصة', '% رد على الاتصال', '% تحويل لحجز',
+    '% حضور', 'متوسط وقت الرد (ساعة)'
+  ];
+  dash.getRange(currentRow, 2, 1, S2_SPAN).setValues([s2Headers]);
+  styleColHeaders(dash.getRange(currentRow, 2, 1, S2_SPAN), '#137333');
+  applyBorders(dash.getRange(currentRow, 2, 1, S2_SPAN));
   currentRow++;
 
-  var cColHeaders = ['Doctor', 'Total', 'تم التواصل', 'تم الحجز', 'حاضر', 'Booking Rate%'];
-  dash.getRange(currentRow, 2, 1, cSpan).setValues([cColHeaders]);
-  styleSubHeader(dash.getRange(currentRow, 2, 1, cSpan), '#4527a0');
-  applyBorders(dash.getRange(currentRow, 2, 1, cSpan));
-  currentRow++;
+  var s2DataStart = currentRow;
+  platforms.forEach(function(p) {
+    // Each % = specific status count / total leads for that platform
+    var totalFormula    = countPlat(p);
+    var contactedFormula = countPlatVal(p, K_CONTACT, 'تم التواصل');
+    var bookedFormula   = countPlatVal(p, L_BOOKING,  'تم الحجز');
+    var showedFormula   = countPlatVal(p, M_ATTEND,   'حضر');
 
-  if (doctors.length === 0) {
-    dash.getRange(currentRow, 2, 1, cSpan).merge()
-        .setValue('لا توجد بيانات حتى الآن — No data yet')
-        .setFontColor('#999999').setHorizontalAlignment('center');
-    applyBorders(dash.getRange(currentRow, 2, 1, cSpan));
-    currentRow++;
-  } else {
-    var cDataStart = currentRow;
-    doctors.forEach(function(doctor) {
-      var bCell = 'B' + currentRow; // doctor name cell for COUNTIFS
-      var cCell = 'C' + currentRow; // total
-      var eCell = 'E' + currentRow; // booked
-
-      var rowData = [
-        doctor,
-        '=' + countDoctor(bCell),
-        '=' + countDoctorIn(bCell, CONTACT_COL, 'تم التواصل'),
-        '=' + countDoctorIn(bCell, BOOKING_COL,  'تم الحجز'),
-        '=' + countDoctorIn(bCell, ATTEND_COL,   'حاضر'),
-        '=' + rate(eCell, cCell)
-      ];
-      dash.getRange(currentRow, 2, 1, cSpan).setValues([rowData]);
-      styleLabel(dash.getRange(currentRow, 2));
-      styleValue(dash.getRange(currentRow, 3, 1, cSpan - 1));
-      applyBorders(dash.getRange(currentRow, 2, 1, cSpan));
-      currentRow++;
-    });
-
-    // Doctor totals row
-    var cs = cDataStart, ce = currentRow - 1;
-    var cTotals = [
-      'الإجمالي',
-      '=SUM(C' + cs + ':C' + ce + ')',
-      '=SUM(D' + cs + ':D' + ce + ')',
-      '=SUM(E' + cs + ':E' + ce + ')',
-      '=SUM(F' + cs + ':F' + ce + ')',
-      '=' + rate('E' + currentRow, 'C' + currentRow)
+    var rowData = [
+      p,
+      '=IFERROR(TEXT((' + contactedFormula + ')/(' + totalFormula + '),"0.0%"),"—")',
+      '=IFERROR(TEXT((' + bookedFormula   + ')/(' + totalFormula + '),"0.0%"),"—")',
+      '=IFERROR(TEXT((' + showedFormula   + ')/(' + totalFormula + '),"0.0%"),"—")',
+      '=' + avgResponsePlat(p)
     ];
-    dash.getRange(currentRow, 2, 1, cSpan).setValues([cTotals]);
-    dash.getRange(currentRow, 2, 1, cSpan).setFontWeight('bold')
-        .setBackground('#ede7f6');
-    applyBorders(dash.getRange(currentRow, 2, 1, cSpan));
+    dash.getRange(currentRow, 2, 1, S2_SPAN).setValues([rowData]);
+    styleLabel(dash.getRange(currentRow, 2));
+    styleValue(dash.getRange(currentRow, 3, 1, S2_SPAN - 1));
+    applyBorders(dash.getRange(currentRow, 2, 1, S2_SPAN));
     currentRow++;
-  }
+  });
+
+  // Overall averages row
+  var s2End = currentRow - 1;
+  var totalAllFormula   = 'COUNTA(' + cr('A') + ')-1';
+  var contactedAllFml   = 'COUNTIF(' + cr(K_CONTACT) + ',"تم التواصل")';
+  var bookedAllFml      = 'COUNTIF(' + cr(L_BOOKING)  + ',"تم الحجز")';
+  var showedAllFml      = 'COUNTIF(' + cr(M_ATTEND)   + ',"حضر")';
+
+  var s2Totals = [
+    'الإجمالي',
+    '=IFERROR(TEXT((' + contactedAllFml + ')/(' + totalAllFormula + '),"0.0%"),"—")',
+    '=IFERROR(TEXT((' + bookedAllFml   + ')/(' + totalAllFormula + '),"0.0%"),"—")',
+    '=IFERROR(TEXT((' + showedAllFml   + ')/(' + totalAllFormula + '),"0.0%"),"—")',
+    '=IFERROR(AVERAGEIF(' + cr(O_RESPONSE) + ',">0"),"—")'
+  ];
+  dash.getRange(currentRow, 2, 1, S2_SPAN).setValues([s2Totals]);
+  styleTotals(dash.getRange(currentRow, 2, 1, S2_SPAN), '#d9ead3');
+  dash.getRange(currentRow, 2).setHorizontalAlignment('right');
+  applyBorders(dash.getRange(currentRow, 2, 1, S2_SPAN));
+  currentRow++;
+
+  currentRow++; // spacer
+
+  // ===========================================================
+  // SECTION 3 — تنبيهات
+  // 3 fixed alert rows with live formulas
+  // ===========================================================
+  var S3_SPAN = 4;
+
+  dash.getRange(currentRow, 2, 1, S3_SPAN).merge()
+      .setValue('🔔  تنبيهات');
+  styleHeader(dash.getRange(currentRow, 2, 1, S3_SPAN), ORANGE_DARK);
+  applyBorders(dash.getRange(currentRow, 2, 1, S3_SPAN));
+  currentRow++;
+
+  var s3ColHeaders = ['التنبيه', 'القيمة', '', ''];
+  dash.getRange(currentRow, 2, 1, S3_SPAN).setValues([s3ColHeaders]);
+  styleColHeaders(dash.getRange(currentRow, 2, 1, S3_SPAN), '#b45309');
+  applyBorders(dash.getRange(currentRow, 2, 1, S3_SPAN));
+  currentRow++;
+
+  // Alert 1: leads with no contact for more than 24 hours
+  // contact_status = "جديد" AND created_time < NOW() - 1
+  var alert1Formula = '=COUNTIFS('
+    + cr(K_CONTACT) + ',"جديد",'
+    + cr('B')       + ',"<"&(NOW()-1))';
+
+  // Alert 2: leads booked but not yet attended (booking=تم الحجز, attendance=blank)
+  var alert2Formula = '=COUNTIFS('
+    + cr(L_BOOKING) + ',"تم الحجز",'
+    + cr(M_ATTEND)  + ',"")';
+
+  // Alert 3: best platform this week (most leads since Monday)
+  // Uses array COUNTIFS against the 3 platform names; INDEX/MATCH picks the max
+  var weekStart = 'TODAY()-WEEKDAY(TODAY(),2)+1'; // Monday of current week
+  var alert3Formula = '=IFERROR(INDEX({"Meta","Snapchat","TikTok"},'
+    + 'MATCH(MAX('
+    +   'COUNTIFS(' + cr(F_PLATFORM) + ',{"Meta","Snapchat","TikTok"},'
+                    + cr('B')        + ',">="&(' + weekStart + ')))'
+    + ','
+    +   'COUNTIFS(' + cr(F_PLATFORM) + ',{"Meta","Snapchat","TikTok"},'
+                    + cr('B')        + ',">="&(' + weekStart + '))'
+    + ',0)),"—")';
+
+  var alerts = [
+    ['ليدز بدون تواصل أكثر من 24 ساعة', alert1Formula],
+    ['ليدز حجزت ولم تحضر بعد',           alert2Formula],
+    ['أفضل منصة هذا الأسبوع',            alert3Formula]
+  ];
+
+  alerts.forEach(function(pair, idx) {
+    dash.getRange(currentRow, 2).setValue(pair[0]);
+    dash.getRange(currentRow, 3).setFormula(pair[1]);
+    styleLabel(dash.getRange(currentRow, 2));
+
+    var valueCell = dash.getRange(currentRow, 3);
+    styleValue(valueCell);
+    valueCell.setFontWeight('bold');
+
+    // Highlight the no-contact alert row in red when value > 0
+    if (idx === 0) {
+      // Conditional formatting not available via Apps Script on formula cells,
+      // so we style the label red as a permanent visual cue.
+      dash.getRange(currentRow, 2).setFontColor('#c62828');
+    }
+
+    dash.getRange(currentRow, 4, 1, 2).setBackground(WHITE); // fill unused cols
+    applyBorders(dash.getRange(currentRow, 2, 1, S3_SPAN));
+    currentRow++;
+  });
 
   // ----------------------------------------------------------
-  // Final flush
+  // Flush and log
   // ----------------------------------------------------------
   SpreadsheetApp.flush();
-  logToSheet('setupDashboard', 'Dashboard built with ' + doctors.length + ' doctor(s)', 'OK');
-  Logger.log('setupDashboard: complete — ' + doctors.length + ' doctor(s) in Section C');
+  logToSheet('setupDashboard', 'Dashboard rebuilt — 3 sections', 'OK');
+  Logger.log('setupDashboard: complete');
 }
 
 // ------------------------------------------------------------
