@@ -15,7 +15,36 @@ const CONFIG = {
   CRM_SHEET:                'CRM',
   CONFIG_SHEET:             'Config',
   LOGS_SHEET:               'Logs',
-  DASHBOARD_SHEET:          'Dashboard'
+  DASHBOARD_SHEET:          'Dashboard',
+
+  // CRM column positions (1-based) — update here if layout ever changes
+  COL: {
+    LEAD_ID:            1,   // A
+    CREATED_TIME:       2,   // B
+    FULL_NAME:          3,   // C
+    PHONE:              4,   // D
+    EMAIL:              5,   // E
+    PLATFORM:           6,   // F
+    CAMPAIGN_NAME:      7,   // G
+    DOCTOR_NAME:        8,   // H
+    SERVICE_NAME:       9,   // I
+    FORM_ANSWER:        10,  // J
+    CONTACT_STATUS:     11,  // K  ← was lead_status
+    BOOKING_STATUS:     12,  // L  ← new
+    ATTENDANCE_STATUS:  13,  // M  ← new
+    FIRST_CONTACT_TIME: 14,  // N  (was L)
+    RESPONSE_TIME_HRS:  15,  // O  (was M)
+    NO_BOOKING_REASON:  16,  // P  (was N)
+    NO_SHOW_REASON:     17,  // Q  (was O)
+    SALES_AGENT:        18,  // R  (was P)
+    NOTES:              19,  // S  (was Q)
+    SYNCED_TO_DOCTOR:   20   // T  (was R)
+  },
+
+  // Dropdown values for each status column
+  CONTACT_STATUS_VALUES:    ['جديد', 'تم التواصل', 'لم يتم التواصل'],
+  BOOKING_STATUS_VALUES:    ['لم يتم الرد', 'استفسار', 'تم الحجز'],
+  ATTENDANCE_STATUS_VALUES: ['حاضر', 'لم يحضر', 'إعادة جدولة']
 };
 
 // ------------------------------------------------------------
@@ -274,24 +303,26 @@ function setupCRM() {
 
   if (crmSheet.getLastRow() === 0) {
     var crmHeaders = [
-      'Lead_ID',            // A
-      'created_time',       // B
-      'full_name',          // C
-      'phone',              // D
-      'email',              // E
-      'platform',           // F
-      'campaign_name',      // G
-      'doctor_name',        // H
-      'service_name',       // I
-      'form_answer',        // J
-      'lead_status',        // K
-      'first_contact_time', // L
-      'response_time_hours',// M
-      'no_booking_reason',  // N
-      'no_show_reason',     // O
-      'sales_agent',        // P
-      'notes',              // Q
-      'synced_to_doctor'    // R
+      'Lead_ID',             // A  col 1
+      'created_time',        // B  col 2
+      'full_name',           // C  col 3
+      'phone',               // D  col 4
+      'email',               // E  col 5
+      'platform',            // F  col 6
+      'campaign_name',       // G  col 7
+      'doctor_name',         // H  col 8
+      'service_name',        // I  col 9
+      'form_answer',         // J  col 10
+      'contact_status',      // K  col 11  ← NEW (was lead_status)
+      'booking_status',      // L  col 12  ← NEW
+      'attendance_status',   // M  col 13  ← NEW
+      'first_contact_time',  // N  col 14  (was L)
+      'response_time_hours', // O  col 15  (was M)
+      'no_booking_reason',   // P  col 16  (was N)
+      'no_show_reason',      // Q  col 17  (was O)
+      'sales_agent',         // R  col 18  (was P)
+      'notes',               // S  col 19  (was Q)
+      'synced_to_doctor'     // T  col 20  (was R)
     ];
 
     // Write header row
@@ -307,48 +338,55 @@ function setupCRM() {
     // Freeze row 1
     crmSheet.setFrozenRows(1);
 
-    // M2: auto-calculate response time in hours from created_time (B) and
-    // first_contact_time (L). Formula covers the full column via ARRAYFORMULA.
-    crmSheet.getRange('M2').setFormula(
-      '=IF(L2="","",ROUND((L2-B2)*24,1))'
+    // O2: response time in hours — now references N (first_contact_time), not L
+    crmSheet.getRange('O2').setFormula(
+      '=IF(N2="","",ROUND((N2-B2)*24,1))'
     );
 
     // -----------------------------------------------------------
     // Data-validation dropdowns
     // -----------------------------------------------------------
+    var maxRows = crmSheet.getMaxRows() - 1;
 
-    // Column K — lead_status (entire column, excluding header)
-    var leadStatusRule = SpreadsheetApp.newDataValidation()
-      .requireValueInList(
-        ['جديد', 'تم الاتصال', 'تم الحجز', 'لم يتم الحجز', 'حضر', 'لم يحضر', 'اتحول لعميل'],
-        true
-      )
-      .setAllowInvalid(false)
-      .build();
-    crmSheet.getRange(2, 11, crmSheet.getMaxRows() - 1, 1)
-      .setDataValidation(leadStatusRule);
+    // Column K — contact_status
+    crmSheet.getRange(2, CONFIG.COL.CONTACT_STATUS, maxRows, 1)
+      .setDataValidation(
+        SpreadsheetApp.newDataValidation()
+          .requireValueInList(CONFIG.CONTACT_STATUS_VALUES, true)
+          .setAllowInvalid(false).build()
+      );
 
-    // Column N — no_booking_reason (entire column, excluding header)
-    var noBookingRule = SpreadsheetApp.newDataValidation()
-      .requireValueInList(
-        ['السعر', 'عدم الاهتمام', 'لم يرد', 'أجّل', 'أخرى'],
-        true
-      )
-      .setAllowInvalid(false)
-      .build();
-    crmSheet.getRange(2, 14, crmSheet.getMaxRows() - 1, 1)
-      .setDataValidation(noBookingRule);
+    // Column L — booking_status
+    crmSheet.getRange(2, CONFIG.COL.BOOKING_STATUS, maxRows, 1)
+      .setDataValidation(
+        SpreadsheetApp.newDataValidation()
+          .requireValueInList(CONFIG.BOOKING_STATUS_VALUES, true)
+          .setAllowInvalid(false).build()
+      );
 
-    // Column O — no_show_reason (entire column, excluding header)
-    var noShowRule = SpreadsheetApp.newDataValidation()
-      .requireValueInList(
-        ['نسي', 'ظرف طارئ', 'لم يرد', 'أخرى'],
-        true
-      )
-      .setAllowInvalid(false)
-      .build();
-    crmSheet.getRange(2, 15, crmSheet.getMaxRows() - 1, 1)
-      .setDataValidation(noShowRule);
+    // Column M — attendance_status
+    crmSheet.getRange(2, CONFIG.COL.ATTENDANCE_STATUS, maxRows, 1)
+      .setDataValidation(
+        SpreadsheetApp.newDataValidation()
+          .requireValueInList(CONFIG.ATTENDANCE_STATUS_VALUES, true)
+          .setAllowInvalid(false).build()
+      );
+
+    // Column P — no_booking_reason (was N)
+    crmSheet.getRange(2, CONFIG.COL.NO_BOOKING_REASON, maxRows, 1)
+      .setDataValidation(
+        SpreadsheetApp.newDataValidation()
+          .requireValueInList(['السعر', 'عدم الاهتمام', 'لم يرد', 'أجّل', 'أخرى'], true)
+          .setAllowInvalid(false).build()
+      );
+
+    // Column Q — no_show_reason (was O)
+    crmSheet.getRange(2, CONFIG.COL.NO_SHOW_REASON, maxRows, 1)
+      .setDataValidation(
+        SpreadsheetApp.newDataValidation()
+          .requireValueInList(['نسي', 'ظرف طارئ', 'لم يرد', 'أخرى'], true)
+          .setAllowInvalid(false).build()
+      );
   }
 
   // -----------------------------------------------------------
@@ -492,12 +530,13 @@ function syncAllLeads() {
           // plus any rows already collected in this run.
           var leadId = generateLeadId(crmSheet);
 
-          // Build the 18-column CRM row
+          // Build the 20-column CRM row
           // [A]Lead_ID [B]created_time [C]full_name [D]phone [E]email
           // [F]platform [G]campaign_name [H]doctor_name [I]service_name
-          // [J]form_answer [K]lead_status [L]first_contact_time
-          // [M]response_time_hours [N]no_booking_reason [O]no_show_reason
-          // [P]sales_agent [Q]notes [R]synced_to_doctor
+          // [J]form_answer [K]contact_status [L]booking_status
+          // [M]attendance_status [N]first_contact_time [O]response_time_hours
+          // [P]no_booking_reason [Q]no_show_reason [R]sales_agent
+          // [S]notes [T]synced_to_doctor
           var newRow = [
             leadId,        // A — Lead_ID
             createdTime,   // B — created_time
@@ -509,14 +548,16 @@ function syncAllLeads() {
             doctorName,    // H — doctor_name
             serviceName,   // I — service_name
             formAnswer,    // J — form_answer
-            'جديد',        // K — lead_status  (default: new)
-            '',            // L — first_contact_time
-            '',            // M — response_time_hours (formula-driven)
-            '',            // N — no_booking_reason
-            '',            // O — no_show_reason
-            '',            // P — sales_agent
-            '',            // Q — notes
-            'No'           // R — synced_to_doctor
+            'جديد',        // K — contact_status   (default: new)
+            '',            // L — booking_status
+            '',            // M — attendance_status
+            '',            // N — first_contact_time
+            '',            // O — response_time_hours (formula-driven)
+            '',            // P — no_booking_reason
+            '',            // Q — no_show_reason
+            '',            // R — sales_agent
+            '',            // S — notes
+            'No'           // T — synced_to_doctor
           ];
 
           allNewRows.push(newRow);
@@ -537,7 +578,7 @@ function syncAllLeads() {
     if (allNewRows.length > 0) {
       var writeStartRow = crmSheet.getLastRow() + 1;
       crmSheet
-        .getRange(writeStartRow, 1, allNewRows.length, 18)
+        .getRange(writeStartRow, 1, allNewRows.length, 20)
         .setValues(allNewRows);
     }
 
@@ -607,7 +648,7 @@ function distributeToDoctor() {
 
   // Rows are 1-indexed in the sheet; store alongside their sheet row number
   // so we can update column R later without re-scanning.
-  var crmData = crmSheet.getRange(2, 1, crmLastRow - 1, 18).getValues();
+  var crmData = crmSheet.getRange(2, 1, crmLastRow - 1, 20).getValues();
   // crmData[i] corresponds to sheet row (i + 2)
 
   // ----------------------------------------------------------
@@ -629,8 +670,9 @@ function distributeToDoctor() {
       var isNewSheet = docSheet.getLastRow() === 0;
       if (isNewSheet) {
         var docHeaders = [
-          'Lead_ID', 'full_name', 'phone', 'platform',
-          'service', 'lead_status', 'form_answer', 'notes'
+          'Lead_ID', 'full_name', 'phone', 'platform', 'service',
+          'contact_status', 'booking_status', 'attendance_status',
+          'form_answer', 'notes'
         ];
         var docHeaderRange = docSheet.getRange(1, 1, 1, docHeaders.length);
         docHeaderRange.setValues([docHeaders]);
@@ -663,24 +705,28 @@ function distributeToDoctor() {
 
       crmData.forEach(function(crmRow, i) {
         var crmDoctorKey = String(crmRow[7]).trim().toLowerCase(); // col H (index 7)
-        var syncedFlag   = String(crmRow[17]).trim();              // col R (index 17)
+        var syncedFlag   = String(crmRow[19]).trim();              // col T (index 19)
         var leadId       = String(crmRow[0]).trim();               // col A (index 0)
 
         if (crmDoctorKey !== doctorKey) return;
         if (syncedFlag === 'Yes') return;
         if (existingLeadIds.has(leadId)) return; // already in doctor sheet
 
-        // Build the 8-column doctor row
-        // A:Lead_ID B:full_name C:phone D:platform E:service F:lead_status G:form_answer H:notes
+        // Build the 10-column doctor row
+        // A:Lead_ID B:full_name C:phone D:platform E:service
+        // F:contact_status G:booking_status H:attendance_status
+        // I:form_answer J:notes
         rowsForDoctor.push([
           crmRow[0],   // Lead_ID
           crmRow[2],   // full_name
           crmRow[3],   // phone
           crmRow[5],   // platform
           crmRow[8],   // service_name
-          crmRow[10],  // lead_status
+          crmRow[10],  // contact_status
+          crmRow[11],  // booking_status
+          crmRow[12],  // attendance_status
           crmRow[9],   // form_answer
-          crmRow[16]   // notes
+          crmRow[18]   // notes (col S, index 18)
         ]);
 
         crmRowsToMark.push(i + 2); // sheet row = array index + 2 (1-header + 1-base)
@@ -693,15 +739,15 @@ function distributeToDoctor() {
       if (rowsForDoctor.length > 0) {
         var writeStart = docSheet.getLastRow() + 1;
         docSheet
-          .getRange(writeStart, 1, rowsForDoctor.length, 8)
+          .getRange(writeStart, 1, rowsForDoctor.length, 10)
           .setValues(rowsForDoctor);
       }
 
       // --------------------------------------------------------
-      // 3e. Mark synced rows in CRM column R = "Yes" in batch
+      // 3e. Mark synced rows in CRM column T = "Yes" in batch
       // --------------------------------------------------------
       crmRowsToMark.forEach(function(sheetRow) {
-        crmSheet.getRange(sheetRow, 18).setValue('Yes'); // col R = column 18
+        crmSheet.getRange(sheetRow, CONFIG.COL.SYNCED_TO_DOCTOR).setValue('Yes'); // col T = 20
       });
 
       var msg = 'Sent ' + rowsForDoctor.length + ' lead(s) to ' + doctorRaw;
@@ -773,16 +819,18 @@ function syncStatusFromDoctors() {
     return;
   }
 
-  var crmData   = crmSheet.getRange(2, 1, crmLastRow - 1, 11).getValues();
-  // columns read: A(0)=Lead_ID … K(10)=lead_status
-  var leadIdMap = new Map(); // Lead_ID → { sheetRow, status }
+  var crmData   = crmSheet.getRange(2, 1, crmLastRow - 1, 13).getValues();
+  // columns read: A(0)=Lead_ID … M(12)=attendance_status
+  var leadIdMap = new Map(); // Lead_ID → { sheetRow, contactStatus, bookingStatus, attendanceStatus }
 
   crmData.forEach(function(row, i) {
     var leadId = String(row[0]).trim();
     if (leadId) {
       leadIdMap.set(leadId, {
-        sheetRow: i + 2,            // 1-based sheet row
-        status:   String(row[10]).trim() // col K = index 10
+        sheetRow:         i + 2,
+        contactStatus:    String(row[10]).trim(), // col K index 10
+        bookingStatus:    String(row[11]).trim(), // col L index 11
+        attendanceStatus: String(row[12]).trim()  // col M index 12
       });
     }
   });
@@ -809,24 +857,37 @@ function syncStatusFromDoctors() {
       var docLastRow = docSheet.getLastRow();
       if (docLastRow < 2) return; // no data yet
 
-      // Read col A (Lead_ID) and col F (lead_status) together
-      var docData     = docSheet.getRange(2, 1, docLastRow - 1, 6).getValues();
+      // Read cols A(Lead_ID), F(contact_status), G(booking_status), H(attendance_status)
+      var docData      = docSheet.getRange(2, 1, docLastRow - 1, 8).getValues();
       var updatedCount = 0;
 
       docData.forEach(function(docRow) {
-        var leadId    = String(docRow[0]).trim();  // col A
-        var docStatus = String(docRow[5]).trim();  // col F
+        var leadId            = String(docRow[0]).trim(); // col A
+        var docContactStatus  = String(docRow[5]).trim(); // col F
+        var docBookingStatus  = String(docRow[6]).trim(); // col G
+        var docAttendStatus   = String(docRow[7]).trim(); // col H
 
-        if (!leadId || !docStatus) return;
+        if (!leadId) return;
 
         var crmEntry = leadIdMap.get(leadId);
-        if (!crmEntry) return;                     // lead not in CRM (shouldn't happen)
-        if (crmEntry.status === docStatus) return; // no change
+        if (!crmEntry) return; // lead not in CRM
 
-        updates.push({ sheetRow: crmEntry.sheetRow, newStatus: docStatus });
-        // Keep the map current so later doctors can't re-overwrite with stale data
-        crmEntry.status = docStatus;
-        updatedCount++;
+        // Queue an update for each status column that has changed
+        if (docContactStatus && crmEntry.contactStatus !== docContactStatus) {
+          updates.push({ sheetRow: crmEntry.sheetRow, col: CONFIG.COL.CONTACT_STATUS, newStatus: docContactStatus });
+          crmEntry.contactStatus = docContactStatus;
+          updatedCount++;
+        }
+        if (docBookingStatus && crmEntry.bookingStatus !== docBookingStatus) {
+          updates.push({ sheetRow: crmEntry.sheetRow, col: CONFIG.COL.BOOKING_STATUS, newStatus: docBookingStatus });
+          crmEntry.bookingStatus = docBookingStatus;
+          updatedCount++;
+        }
+        if (docAttendStatus && crmEntry.attendanceStatus !== docAttendStatus) {
+          updates.push({ sheetRow: crmEntry.sheetRow, col: CONFIG.COL.ATTENDANCE_STATUS, newStatus: docAttendStatus });
+          crmEntry.attendanceStatus = docAttendStatus;
+          updatedCount++;
+        }
       });
 
       logToSheet(
@@ -845,10 +906,10 @@ function syncStatusFromDoctors() {
   });
 
   // ----------------------------------------------------------
-  // 4. Write all status updates to CRM column K in one pass
+  // 4. Write all status updates to CRM (cols K/L/M) in one pass
   // ----------------------------------------------------------
   updates.forEach(function(upd) {
-    crmSheet.getRange(upd.sheetRow, 11).setValue(upd.newStatus); // col K = column 11
+    crmSheet.getRange(upd.sheetRow, upd.col).setValue(upd.newStatus);
   });
 
   SpreadsheetApp.flush();
@@ -881,8 +942,8 @@ function sendDailyReport() {
       return;
     }
 
-    // Read cols A–K (11 columns): Lead_ID … lead_status
-    var data = crmSheet.getRange(2, 1, crmLastRow - 1, 11).getValues();
+    // Read cols A–M (13 columns): Lead_ID … attendance_status
+    var data = crmSheet.getRange(2, 1, crmLastRow - 1, 13).getValues();
 
     var now        = new Date();
     var todayStr   = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd');
@@ -892,17 +953,22 @@ function sendDailyReport() {
     // ----------------------------------------------------------
     // Metric accumulators
     // ----------------------------------------------------------
-    var leadsToday       = 0;
-    var platformCounts   = {};  // { platformName: count }
-    var noContact24h     = 0;
-    var totalBooked      = 0;
-    var totalConverted   = 0;
-    var totalShowed      = 0;
+    var leadsToday      = 0;
+    var platformCounts  = {};  // { platformName: count }
+    var noContact24h    = 0;   // contact_status = "جديد" AND > 24 h old
+    var totalContacted  = 0;   // contact_status = "تم التواصل"
+    var totalNoContact  = 0;   // contact_status = "لم يتم التواصل"
+    var totalBooked     = 0;   // booking_status = "تم الحجز"
+    var totalShowed     = 0;   // attendance_status = "حاضر"
+    var totalNoShow     = 0;   // attendance_status = "لم يحضر"
+    var totalReschedule = 0;   // attendance_status = "إعادة جدولة"
 
     data.forEach(function(row) {
-      var createdRaw = row[1];   // col B — created_time
-      var platform   = String(row[5] || '').trim();  // col F
-      var status     = String(row[10] || '').trim(); // col K
+      var createdRaw      = row[1];                            // col B
+      var platform        = String(row[5]  || '').trim();      // col F
+      var contactStatus   = String(row[10] || '').trim();      // col K
+      var bookingStatus   = String(row[11] || '').trim();      // col L
+      var attendStatus    = String(row[12] || '').trim();      // col M
 
       var createdDate = (createdRaw instanceof Date) ? createdRaw : new Date(createdRaw);
       var isValidDate = !isNaN(createdDate.getTime());
@@ -916,15 +982,18 @@ function sendDailyReport() {
         }
       }
 
-      // No-contact in last 24 h: still "جديد" and older than 24 h
-      if (status === 'جديد' && isValidDate && createdDate < cutoff24h) {
+      // No-contact in last 24 h: contact_status still "جديد" and older than 24 h
+      if (contactStatus === 'جديد' && isValidDate && createdDate < cutoff24h) {
         noContact24h++;
       }
 
-      // All-time counters
-      if (status === 'تم الحجز')      totalBooked++;
-      if (status === 'اتحول لعميل')   totalConverted++;
-      if (status === 'حضر')           totalShowed++;
+      // All-time counters by status column
+      if (contactStatus === 'تم التواصل')    totalContacted++;
+      if (contactStatus === 'لم يتم التواصل') totalNoContact++;
+      if (bookingStatus  === 'تم الحجز')      totalBooked++;
+      if (attendStatus   === 'حاضر')          totalShowed++;
+      if (attendStatus   === 'لم يحضر')       totalNoShow++;
+      if (attendStatus   === 'إعادة جدولة')   totalReschedule++;
     });
 
     // ----------------------------------------------------------
@@ -996,14 +1065,23 @@ function sendDailyReport() {
       + '  </table>'
       + '</div>'
 
-      // All-time counters
+      // All-time counters — broken out by status column
       + '<div class="section">'
       + '  <h3>إجمالي الأداء (كل الوقت)</h3>'
       + '  <table>'
       + '    <tr><th>المؤشر</th><th style="text-align:center;">العدد</th></tr>'
-      + '    <tr><td>تم الحجز</td><td style="text-align:center;">'      + totalBooked    + '</td></tr>'
-      + '    <tr><td>حضر</td><td style="text-align:center;">'            + totalShowed    + '</td></tr>'
-      + '    <tr><td>تحول لعميل</td><td style="text-align:center;">'    + totalConverted + '</td></tr>'
+      // contact_status
+      + '    <tr><td style="background:#e8f0fe;font-weight:bold;" colspan="2">حالة التواصل</td></tr>'
+      + '    <tr><td>تم التواصل</td><td style="text-align:center;">'         + totalContacted  + '</td></tr>'
+      + '    <tr><td>لم يتم التواصل</td><td style="text-align:center;">'     + totalNoContact  + '</td></tr>'
+      // booking_status
+      + '    <tr><td style="background:#e6f4ea;font-weight:bold;" colspan="2">حالة الحجز</td></tr>'
+      + '    <tr><td>تم الحجز</td><td style="text-align:center;">'            + totalBooked     + '</td></tr>'
+      // attendance_status
+      + '    <tr><td style="background:#fce8e6;font-weight:bold;" colspan="2">حالة الحضور</td></tr>'
+      + '    <tr><td>حضر</td><td style="text-align:center;">'                 + totalShowed     + '</td></tr>'
+      + '    <tr><td>لم يحضر</td><td style="text-align:center;">'             + totalNoShow     + '</td></tr>'
+      + '    <tr><td>إعادة جدولة</td><td style="text-align:center;">'         + totalReschedule + '</td></tr>'
       + '  </table>'
       + '</div>'
 
@@ -1105,335 +1183,362 @@ function setupAllTriggers() {
 function setupDashboard() {
   var crmSS   = SpreadsheetApp.openById(CONFIG.CRM_SPREADSHEET_ID);
   var dash    = getOrCreateSheet(crmSS, CONFIG.DASHBOARD_SHEET);
-  var crmName = CONFIG.CRM_SHEET; // used inside formula strings
+  var crmName = CONFIG.CRM_SHEET;
 
   // ----------------------------------------------------------
   // Shared style helpers
   // ----------------------------------------------------------
-  var BLUE   = '#1a73e8';
-  var GREEN  = '#34a853';
-  var PURPLE = '#673ab7';
-  var WHITE  = '#ffffff';
-  var LABEL_BG  = '#f8f9fa';
-  var VALUE_BG  = '#ffffff';
+  var BLUE         = '#1a73e8';
+  var GREEN        = '#34a853';
+  var PURPLE       = '#673ab7';
+  var WHITE        = '#ffffff';
+  var LABEL_BG     = '#f8f9fa';
   var BORDER_COLOR = '#dadce0';
 
   function styleHeader(range, bg) {
-    range.setBackground(bg)
-         .setFontColor(WHITE)
-         .setFontWeight('bold')
-         .setFontSize(11)
+    range.setBackground(bg).setFontColor(WHITE)
+         .setFontWeight('bold').setFontSize(11)
          .setHorizontalAlignment('center');
   }
-
+  function styleSubHeader(range, bg) {
+    range.setBackground(bg).setFontColor(WHITE)
+         .setFontWeight('bold').setFontSize(10)
+         .setHorizontalAlignment('center');
+  }
   function styleLabel(range) {
-    range.setBackground(LABEL_BG)
-         .setFontWeight('bold')
-         .setFontSize(10)
-         .setHorizontalAlignment('right');
+    range.setBackground(LABEL_BG).setFontWeight('bold')
+         .setFontSize(10).setHorizontalAlignment('right');
   }
-
   function styleValue(range) {
-    range.setBackground(VALUE_BG)
-         .setFontSize(10)
+    range.setBackground(WHITE).setFontSize(10)
          .setHorizontalAlignment('center');
   }
-
   function applyBorders(range) {
     range.setBorder(true, true, true, true, true, true,
                     BORDER_COLOR, SpreadsheetApp.BorderStyle.SOLID);
   }
 
   // ----------------------------------------------------------
-  // 0. Clear everything and set column widths
+  // 0. Clear and set column widths
+  //    Sections span cols B–I (8 data cols) to fit 3-status tables
   // ----------------------------------------------------------
   dash.clearContents();
   dash.clearFormats();
   dash.setFrozenRows(0);
 
   dash.setColumnWidth(1, 30);   // A — spacer
-  dash.setColumnWidth(2, 200);  // B — label / platform / doctor
-  dash.setColumnWidth(3, 110);  // C
-  dash.setColumnWidth(4, 110);  // D
-  dash.setColumnWidth(5, 110);  // E
-  dash.setColumnWidth(6, 110);  // F
-  dash.setColumnWidth(7, 110);  // G
-  dash.setColumnWidth(8, 130);  // H — conversion %
+  dash.setColumnWidth(2, 190);  // B — label / platform / doctor
+  dash.setColumnWidth(3, 90);   // C
+  dash.setColumnWidth(4, 120);  // D
+  dash.setColumnWidth(5, 120);  // E
+  dash.setColumnWidth(6, 120);  // F
+  dash.setColumnWidth(7, 120);  // G
+  dash.setColumnWidth(8, 120);  // H
+  dash.setColumnWidth(9, 110);  // I — rate %
 
   // ----------------------------------------------------------
-  // Reusable COUNTIFS snippet builders
-  // Formula column references (1-based → letter):
-  //   K = lead_status   H = doctor_name   F = platform
+  // Formula helpers — column letters match new CRM layout
   // ----------------------------------------------------------
-  var STATUS_COL    = 'K';  // lead_status
-  var PLATFORM_COL  = 'F';  // platform
-  var DOCTOR_COL    = 'H';  // doctor_name
-  var RESPONSE_COL  = 'M';  // response_time_hours
-  var DATA_RANGE    = "'" + crmName + "'!{COL}:{COL}";
+  var CONTACT_COL  = 'K';  // contact_status
+  var BOOKING_COL  = 'L';  // booking_status
+  var ATTEND_COL   = 'M';  // attendance_status
+  var PLATFORM_COL = 'F';
+  var DOCTOR_COL   = 'H';
+  var RESPONSE_COL = 'O';  // response_time_hours (was M)
 
   function colRange(col) {
     return "'" + crmName + "'!" + col + ":" + col;
   }
-
-  // COUNTIF for a specific status
-  function countStatus(status) {
-    return 'COUNTIF(' + colRange(STATUS_COL) + ',"' + status + '")';
+  // COUNTIF value in a specific CRM column
+  function countIn(crmCol, value) {
+    return 'COUNTIF(' + colRange(crmCol) + ',"' + value + '")';
   }
-
-  // COUNTIFS platform + status
-  function countPlatformStatus(platform, status) {
+  // COUNTIFS platform + value in a specific CRM column
+  function countPlatformIn(platform, crmCol, value) {
     return 'COUNTIFS('
       + colRange(PLATFORM_COL) + ',"' + platform + '",'
-      + colRange(STATUS_COL)   + ',"' + status   + '"'
+      + colRange(crmCol)       + ',"' + value    + '"'
       + ')';
   }
-
-  // COUNTIF platform (total)
+  // COUNTIF platform total
   function countPlatform(platform) {
     return 'COUNTIF(' + colRange(PLATFORM_COL) + ',"' + platform + '")';
   }
-
-  // COUNTIFS doctor + status
-  function countDoctorStatus(doctorCell, status) {
-    // doctorCell is a sheet reference like "B25" so we can drag/update easily
+  // COUNTIFS doctor (cell ref) + value in a specific CRM column
+  function countDoctorIn(doctorCell, crmCol, value) {
     return 'COUNTIFS('
       + colRange(DOCTOR_COL) + ',' + doctorCell + ','
-      + colRange(STATUS_COL) + ',"' + status + '"'
+      + colRange(crmCol)     + ',"' + value + '"'
       + ')';
   }
-
-  // COUNTIF doctor (total)
+  // COUNTIF doctor total
   function countDoctor(doctorCell) {
     return 'COUNTIF(' + colRange(DOCTOR_COL) + ',' + doctorCell + ')';
   }
-
-  // Conversion rate % formula: booked / total  (avoids div-by-zero)
-  function convRate(bookedCell, totalCell) {
-    return 'IF(' + totalCell + '=0,"—",'
-         + 'TEXT(' + bookedCell + '/' + totalCell + ',"0.0%"))';
+  // Rate %: bookedCell / totalCell, avoids div-by-zero
+  function rate(bookedCell, totalCell) {
+    return 'IF(' + totalCell + '=0,"—",TEXT(' + bookedCell + '/' + totalCell + ',"0.0%"))';
   }
 
   // ----------------------------------------------------------
-  // 1. Read unique doctor names from CRM column H now
-  //    (needed to build Section C row count before writing)
+  // 1. Read unique doctor names from CRM col H
   // ----------------------------------------------------------
-  var crmSheet  = crmSS.getSheetByName(crmName);
-  var lastRow   = crmSheet.getLastRow();
-  var doctors   = [];
+  var crmSheet = crmSS.getSheetByName(crmName);
+  var lastRow  = crmSheet.getLastRow();
+  var doctors  = [];
 
   if (lastRow > 1) {
-    var hVals = crmSheet.getRange(2, 8, lastRow - 1, 1).getValues(); // col H
+    var hVals = crmSheet.getRange(2, 8, lastRow - 1, 1).getValues();
     var seen  = {};
     hVals.forEach(function(r) {
       var d = String(r[0]).trim();
-      if (d && d !== 'unknown' && !seen[d]) {
-        seen[d] = true;
-        doctors.push(d);
-      }
+      if (d && d !== 'unknown' && !seen[d]) { seen[d] = true; doctors.push(d); }
     });
     doctors.sort();
   }
 
-  // ----------------------------------------------------------
-  // Helper — write a single row and return the next row number
-  // ----------------------------------------------------------
-  var currentRow = 2; // start at row 2 — leave row 1 as breathing room
+  var currentRow = 2; // row 1 left as breathing room
 
   // ===========================================================
-  // SECTION A — Overall Summary
+  // SECTION A — Overall Summary  (blue, cols B:I)
   // ===========================================================
+  var aSpan = 8; // cols B–I
 
-  // A1: section header spanning B:H
-  var aHeaderRange = dash.getRange(currentRow, 2, 1, 7);
-  aHeaderRange.merge()
-              .setValue('📊  ملخص عام  —  Overall Summary');
-  styleHeader(aHeaderRange, BLUE);
-  applyBorders(aHeaderRange);
+  dash.getRange(currentRow, 2, 1, aSpan).merge()
+      .setValue('📊  ملخص عام  —  Overall Summary');
+  styleHeader(dash.getRange(currentRow, 2, 1, aSpan), BLUE);
+  applyBorders(dash.getRange(currentRow, 2, 1, aSpan));
   currentRow++;
 
-  // Column headers
-  var aColHeaders = ['المؤشر', 'القيمة', '', '', '', '', ''];
-  dash.getRange(currentRow, 2, 1, 7).setValues([aColHeaders]);
+  // Sub-header row
+  dash.getRange(currentRow, 2, 1, aSpan)
+      .setValues([['المؤشر', 'القيمة', '', '', '', '', '', '']]);
   styleLabel(dash.getRange(currentRow, 2));
   styleValue(dash.getRange(currentRow, 3));
   currentRow++;
 
-  // Data rows  [ label , formula ]
-  var summaryRows = [
+  // --- Totals & response time ---
+  var aSummary1 = [
     ['إجمالي الليدز — Total Leads',
      '=COUNTA(' + colRange('A') + ')-1'],
-
-    ['تم الاتصال — Contacted',
-     '=' + countStatus('تم الاتصال')],
-
-    ['تم الحجز — Booked',
-     '=' + countStatus('تم الحجز')],
-
-    ['حضر — Showed Up',
-     '=' + countStatus('حضر')],
-
-    ['تحول لعميل — Converted',
-     '=' + countStatus('اتحول لعميل')],
-
     ['متوسط وقت الاستجابة (ساعة) — Avg Response Hrs',
-     '=IFERROR(AVERAGEIF(' + colRange(RESPONSE_COL) + ',">0"' + '),"—")']
+     '=IFERROR(AVERAGEIF(' + colRange(RESPONSE_COL) + ',">0"),"—")']
   ];
-
-  summaryRows.forEach(function(pair) {
-    var labelCell = dash.getRange(currentRow, 2);
-    var valueCell = dash.getRange(currentRow, 3);
-    labelCell.setValue(pair[0]);
-    valueCell.setFormula(pair[1]);
-    styleLabel(labelCell);
-    styleValue(valueCell);
-    applyBorders(dash.getRange(currentRow, 2, 1, 7));
+  aSummary1.forEach(function(pair) {
+    dash.getRange(currentRow, 2).setValue(pair[0]);
+    dash.getRange(currentRow, 3).setFormula(pair[1]);
+    styleLabel(dash.getRange(currentRow, 2));
+    styleValue(dash.getRange(currentRow, 3));
+    applyBorders(dash.getRange(currentRow, 2, 1, aSpan));
     currentRow++;
   });
 
-  currentRow++; // blank spacer row
-
-  // ===========================================================
-  // SECTION B — By Platform
-  // ===========================================================
-
-  var bHeaderRange = dash.getRange(currentRow, 2, 1, 7);
-  bHeaderRange.merge()
-              .setValue('📱  حسب المنصة  —  By Platform');
-  styleHeader(bHeaderRange, GREEN);
-  applyBorders(bHeaderRange);
+  // --- contact_status group ---
+  dash.getRange(currentRow, 2, 1, aSpan).merge()
+      .setValue('حالة التواصل — Contact Status');
+  styleSubHeader(dash.getRange(currentRow, 2, 1, aSpan), '#1557b0');
+  applyBorders(dash.getRange(currentRow, 2, 1, aSpan));
   currentRow++;
 
-  // Column headers
-  var bColHeaders = ['Platform', 'Total', 'Contacted', 'Booked', 'Showed', 'Converted', 'Conversion %'];
-  dash.getRange(currentRow, 2, 1, 7).setValues([bColHeaders]);
-  styleHeader(dash.getRange(currentRow, 2, 1, 7), '#188038'); // darker green for sub-header
-  applyBorders(dash.getRange(currentRow, 2, 1, 7));
+  [['جديد',              countIn(CONTACT_COL, 'جديد')],
+   ['تم التواصل',        countIn(CONTACT_COL, 'تم التواصل')],
+   ['لم يتم التواصل',   countIn(CONTACT_COL, 'لم يتم التواصل')]
+  ].forEach(function(pair) {
+    dash.getRange(currentRow, 2).setValue(pair[0]);
+    dash.getRange(currentRow, 3).setFormula('=' + pair[1]);
+    styleLabel(dash.getRange(currentRow, 2));
+    styleValue(dash.getRange(currentRow, 3));
+    applyBorders(dash.getRange(currentRow, 2, 1, aSpan));
+    currentRow++;
+  });
+
+  // --- booking_status group ---
+  dash.getRange(currentRow, 2, 1, aSpan).merge()
+      .setValue('حالة الحجز — Booking Status');
+  styleSubHeader(dash.getRange(currentRow, 2, 1, aSpan), '#137333');
+  applyBorders(dash.getRange(currentRow, 2, 1, aSpan));
   currentRow++;
 
+  [['لم يتم الرد',  countIn(BOOKING_COL, 'لم يتم الرد')],
+   ['استفسار',       countIn(BOOKING_COL, 'استفسار')],
+   ['تم الحجز',      countIn(BOOKING_COL, 'تم الحجز')]
+  ].forEach(function(pair) {
+    dash.getRange(currentRow, 2).setValue(pair[0]);
+    dash.getRange(currentRow, 3).setFormula('=' + pair[1]);
+    styleLabel(dash.getRange(currentRow, 2));
+    styleValue(dash.getRange(currentRow, 3));
+    applyBorders(dash.getRange(currentRow, 2, 1, aSpan));
+    currentRow++;
+  });
+
+  // --- attendance_status group ---
+  dash.getRange(currentRow, 2, 1, aSpan).merge()
+      .setValue('حالة الحضور — Attendance Status');
+  styleSubHeader(dash.getRange(currentRow, 2, 1, aSpan), '#4527a0');
+  applyBorders(dash.getRange(currentRow, 2, 1, aSpan));
+  currentRow++;
+
+  [['حاضر',             countIn(ATTEND_COL, 'حاضر')],
+   ['لم يحضر',          countIn(ATTEND_COL, 'لم يحضر')],
+   ['إعادة جدولة',      countIn(ATTEND_COL, 'إعادة جدولة')]
+  ].forEach(function(pair) {
+    dash.getRange(currentRow, 2).setValue(pair[0]);
+    dash.getRange(currentRow, 3).setFormula('=' + pair[1]);
+    styleLabel(dash.getRange(currentRow, 2));
+    styleValue(dash.getRange(currentRow, 3));
+    applyBorders(dash.getRange(currentRow, 2, 1, aSpan));
+    currentRow++;
+  });
+
+  currentRow++; // spacer
+
+  // ===========================================================
+  // SECTION B — By Platform  (green, 3 sub-tables)
+  // Each sub-table: Platform | Total | val1 | val2 | val3 | Rate%
+  // cols B–H = 7 cols
+  // ===========================================================
+  var bSpan     = 7;
   var platforms = ['Meta', 'Snapchat', 'TikTok'];
 
-  platforms.forEach(function(platform) {
-    var totalCell   = 'C' + currentRow;
-    var bookedCell  = 'E' + currentRow;
+  dash.getRange(currentRow, 2, 1, bSpan).merge()
+      .setValue('📱  حسب المنصة  —  By Platform');
+  styleHeader(dash.getRange(currentRow, 2, 1, bSpan), GREEN);
+  applyBorders(dash.getRange(currentRow, 2, 1, bSpan));
+  currentRow++;
 
-    var rowData = [
-      platform,
-      '=' + countPlatform(platform),
-      '=' + countPlatformStatus(platform, 'تم الاتصال'),
-      '=' + countPlatformStatus(platform, 'تم الحجز'),
-      '=' + countPlatformStatus(platform, 'حضر'),
-      '=' + countPlatformStatus(platform, 'اتحول لعميل'),
-      '=' + convRate(bookedCell, totalCell)
-    ];
-
-    var rowRange = dash.getRange(currentRow, 2, 1, 7);
-    rowRange.setValues([rowData]);
-    styleLabel(dash.getRange(currentRow, 2));
-    styleValue(dash.getRange(currentRow, 3, 1, 6));
-    applyBorders(rowRange);
+  // Helper: render one platform sub-table
+  function renderPlatformSubTable(titleText, subBg, statusCol, colHeaders, statusValues) {
+    // sub-table title
+    dash.getRange(currentRow, 2, 1, bSpan).merge().setValue(titleText);
+    styleSubHeader(dash.getRange(currentRow, 2, 1, bSpan), subBg);
+    applyBorders(dash.getRange(currentRow, 2, 1, bSpan));
     currentRow++;
-  });
 
-  // Platform totals row
-  var bTotalRowStart = currentRow - platforms.length; // first platform data row
-  var bTotalRowEnd   = currentRow - 1;
+    // column headers
+    var hRow = ['Platform', 'Total'].concat(colHeaders).concat(['Rate %']);
+    dash.getRange(currentRow, 2, 1, bSpan).setValues([hRow]);
+    styleSubHeader(dash.getRange(currentRow, 2, 1, bSpan), subBg);
+    applyBorders(dash.getRange(currentRow, 2, 1, bSpan));
+    currentRow++;
 
-  var bTotals = [
-    'الإجمالي — Total',
-    '=SUM(C' + bTotalRowStart + ':C' + bTotalRowEnd + ')',
-    '=SUM(D' + bTotalRowStart + ':D' + bTotalRowEnd + ')',
-    '=SUM(E' + bTotalRowStart + ':E' + bTotalRowEnd + ')',
-    '=SUM(F' + bTotalRowStart + ':F' + bTotalRowEnd + ')',
-    '=SUM(G' + bTotalRowStart + ':G' + bTotalRowEnd + ')',
-    '=' + convRate('E' + currentRow, 'C' + currentRow)
-  ];
-  var bTotalsRange = dash.getRange(currentRow, 2, 1, 7);
-  bTotalsRange.setValues([bTotals]);
-  bTotalsRange.setFontWeight('bold').setBackground('#e6f4ea');
-  applyBorders(bTotalsRange);
-  currentRow++;
+    var dataRowStart = currentRow;
+    platforms.forEach(function(p) {
+      var totalCell  = 'C' + currentRow;
+      // first status value = "positive" outcome for rate
+      var posCell    = 'D' + currentRow;
+      var rowData    = [p, '=' + countPlatform(p)];
+      statusValues.forEach(function(sv) {
+        rowData.push('=' + countPlatformIn(p, statusCol, sv));
+      });
+      rowData.push('=' + rate(posCell, totalCell));
 
-  currentRow++; // blank spacer row
+      dash.getRange(currentRow, 2, 1, bSpan).setValues([rowData]);
+      styleLabel(dash.getRange(currentRow, 2));
+      styleValue(dash.getRange(currentRow, 3, 1, bSpan - 1));
+      applyBorders(dash.getRange(currentRow, 2, 1, bSpan));
+      currentRow++;
+    });
+
+    // totals row
+    var s = dataRowStart, e = currentRow - 1;
+    var totRow = ['الإجمالي'];
+    for (var c = 3; c <= 3 + statusValues.length; c++) {
+      var letter = String.fromCharCode(64 + c); // C=3, D=4, …
+      totRow.push('=SUM(' + letter + s + ':' + letter + e + ')');
+    }
+    totRow.push('=' + rate('D' + currentRow, 'C' + currentRow));
+    dash.getRange(currentRow, 2, 1, bSpan).setValues([totRow]);
+    dash.getRange(currentRow, 2, 1, bSpan).setFontWeight('bold')
+        .setBackground('#e6f4ea');
+    applyBorders(dash.getRange(currentRow, 2, 1, bSpan));
+    currentRow++;
+    currentRow++; // spacer between sub-tables
+  }
+
+  renderPlatformSubTable(
+    'حالة التواصل',  '#1557b0', CONTACT_COL,
+    ['جديد', 'تم التواصل', 'لم يتم التواصل'],
+    ['جديد', 'تم التواصل', 'لم يتم التواصل']
+  );
+  renderPlatformSubTable(
+    'حالة الحجز',   '#137333', BOOKING_COL,
+    ['لم يتم الرد', 'استفسار', 'تم الحجز'],
+    ['لم يتم الرد', 'استفسار', 'تم الحجز']
+  );
+  renderPlatformSubTable(
+    'حالة الحضور',  '#4527a0', ATTEND_COL,
+    ['حاضر', 'لم يحضر', 'إعادة جدولة'],
+    ['حاضر', 'لم يحضر', 'إعادة جدولة']
+  );
 
   // ===========================================================
-  // SECTION C — By Doctor
+  // SECTION C — By Doctor  (purple)
+  // Doctor | Total | Contacted | Booked | Showed | Booking Rate%
+  // cols B–G = 6 cols
   // ===========================================================
+  var cSpan = 6;
 
-  var cHeaderRange = dash.getRange(currentRow, 2, 1, 7);
-  cHeaderRange.merge()
-              .setValue('👨‍⚕️  حسب الطبيب  —  By Doctor');
-  styleHeader(cHeaderRange, PURPLE);
-  applyBorders(cHeaderRange);
+  dash.getRange(currentRow, 2, 1, cSpan).merge()
+      .setValue('👨‍⚕️  حسب الطبيب  —  By Doctor');
+  styleHeader(dash.getRange(currentRow, 2, 1, cSpan), PURPLE);
+  applyBorders(dash.getRange(currentRow, 2, 1, cSpan));
   currentRow++;
 
-  // Column headers
-  var cColHeaders = ['Doctor', 'Total Leads', 'Booked', 'Conversion %', '', '', ''];
-  dash.getRange(currentRow, 2, 1, 7).setValues([cColHeaders]);
-  styleHeader(dash.getRange(currentRow, 2, 1, 4), '#4527a0'); // darker purple
-  dash.getRange(currentRow, 6, 1, 3).setBackground(WHITE);
-  applyBorders(dash.getRange(currentRow, 2, 1, 4));
+  var cColHeaders = ['Doctor', 'Total', 'تم التواصل', 'تم الحجز', 'حاضر', 'Booking Rate%'];
+  dash.getRange(currentRow, 2, 1, cSpan).setValues([cColHeaders]);
+  styleSubHeader(dash.getRange(currentRow, 2, 1, cSpan), '#4527a0');
+  applyBorders(dash.getRange(currentRow, 2, 1, cSpan));
   currentRow++;
 
   if (doctors.length === 0) {
-    // Placeholder when no doctor data exists yet
-    var placeholderRange = dash.getRange(currentRow, 2, 1, 4);
-    placeholderRange.merge()
-                    .setValue('لا توجد بيانات حتى الآن — No data yet')
-                    .setFontColor('#999999')
-                    .setHorizontalAlignment('center');
-    applyBorders(placeholderRange);
+    dash.getRange(currentRow, 2, 1, cSpan).merge()
+        .setValue('لا توجد بيانات حتى الآن — No data yet')
+        .setFontColor('#999999').setHorizontalAlignment('center');
+    applyBorders(dash.getRange(currentRow, 2, 1, cSpan));
     currentRow++;
   } else {
+    var cDataStart = currentRow;
     doctors.forEach(function(doctor) {
-      // Write the doctor name in col B so formulas can reference it
-      // — avoids hard-coding Arabic/mixed strings inside COUNTIFS
-      var doctorLabelCell = 'B' + currentRow;
-      var totalCell       = 'C' + currentRow;
-      var bookedCell      = 'D' + currentRow;
+      var bCell = 'B' + currentRow; // doctor name cell for COUNTIFS
+      var cCell = 'C' + currentRow; // total
+      var eCell = 'E' + currentRow; // booked
 
       var rowData = [
         doctor,
-        '=' + countDoctor(doctorLabelCell),
-        '=' + countDoctorStatus(doctorLabelCell, 'تم الحجز'),
-        '=' + convRate(bookedCell, totalCell),
-        '', '', ''
+        '=' + countDoctor(bCell),
+        '=' + countDoctorIn(bCell, CONTACT_COL, 'تم التواصل'),
+        '=' + countDoctorIn(bCell, BOOKING_COL,  'تم الحجز'),
+        '=' + countDoctorIn(bCell, ATTEND_COL,   'حاضر'),
+        '=' + rate(eCell, cCell)
       ];
-
-      var rowRange = dash.getRange(currentRow, 2, 1, 7);
-      rowRange.setValues([rowData]);
+      dash.getRange(currentRow, 2, 1, cSpan).setValues([rowData]);
       styleLabel(dash.getRange(currentRow, 2));
-      styleValue(dash.getRange(currentRow, 3, 1, 2));
-      dash.getRange(currentRow, 5, 1, 3).setBackground(WHITE);
-      applyBorders(dash.getRange(currentRow, 2, 1, 4));
+      styleValue(dash.getRange(currentRow, 3, 1, cSpan - 1));
+      applyBorders(dash.getRange(currentRow, 2, 1, cSpan));
       currentRow++;
     });
 
     // Doctor totals row
-    var cTotalRowStart = currentRow - doctors.length;
-    var cTotalRowEnd   = currentRow - 1;
-
+    var cs = cDataStart, ce = currentRow - 1;
     var cTotals = [
-      'الإجمالي — Total',
-      '=SUM(C' + cTotalRowStart + ':C' + cTotalRowEnd + ')',
-      '=SUM(D' + cTotalRowStart + ':D' + cTotalRowEnd + ')',
-      '=' + convRate('D' + currentRow, 'C' + currentRow),
-      '', '', ''
+      'الإجمالي',
+      '=SUM(C' + cs + ':C' + ce + ')',
+      '=SUM(D' + cs + ':D' + ce + ')',
+      '=SUM(E' + cs + ':E' + ce + ')',
+      '=SUM(F' + cs + ':F' + ce + ')',
+      '=' + rate('E' + currentRow, 'C' + currentRow)
     ];
-    var cTotalsRange = dash.getRange(currentRow, 2, 1, 7);
-    cTotalsRange.setValues([cTotals]);
-    dash.getRange(currentRow, 2, 1, 4)
-        .setFontWeight('bold')
+    dash.getRange(currentRow, 2, 1, cSpan).setValues([cTotals]);
+    dash.getRange(currentRow, 2, 1, cSpan).setFontWeight('bold')
         .setBackground('#ede7f6');
-    dash.getRange(currentRow, 6, 1, 3).setBackground(WHITE);
-    applyBorders(dash.getRange(currentRow, 2, 1, 4));
+    applyBorders(dash.getRange(currentRow, 2, 1, cSpan));
     currentRow++;
   }
 
   // ----------------------------------------------------------
-  // Final: freeze nothing, flush
+  // Final flush
   // ----------------------------------------------------------
   SpreadsheetApp.flush();
-
   logToSheet('setupDashboard', 'Dashboard built with ' + doctors.length + ' doctor(s)', 'OK');
   Logger.log('setupDashboard: complete — ' + doctors.length + ' doctor(s) in Section C');
 }
