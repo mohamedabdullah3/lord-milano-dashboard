@@ -1542,3 +1542,192 @@ function setupDashboard() {
   logToSheet('setupDashboard', 'Dashboard built with ' + doctors.length + ' doctor(s)', 'OK');
   Logger.log('setupDashboard: complete — ' + doctors.length + ' doctor(s) in Section C');
 }
+
+// ------------------------------------------------------------
+// MIGRATION FUNCTION
+// ------------------------------------------------------------
+
+/**
+ * One-time migration: upgrades an existing CRM sheet that has a single
+ * "lead_status" column (K) to the 3-column status model without touching
+ * any existing data rows.
+ *
+ * What this function does:
+ *   1. Locates "lead_status" in the header row — aborts safely if not found
+ *      (already migrated) or if contact_status already exists.
+ *   2. Renames that column header to "contact_status".
+ *   3. Inserts 2 blank columns immediately after it.
+ *      Google Sheets shifts all data and existing formulas right automatically.
+ *   4. Writes "booking_status" and "attendance_status" headers into the new cols.
+ *   5. Replaces the old lead_status dropdown on K with the new contact_status list.
+ *   6. Adds booking_status and attendance_status dropdowns on L and M.
+ *   7. Locates the response_time_hours column by scanning the (now-shifted)
+ *      header row, then explicitly rewrites its formula to reference the
+ *      updated first_contact_time column (one col to its left).
+ *   8. Applies the blue header style to the two new header cells.
+ *   9. Flushes and logs the result.
+ *
+ * Safe to inspect: if the sheet was already migrated the function exits
+ * without making any changes.
+ */
+function updateCRMColumns() {
+  try {
+    var ss    = SpreadsheetApp.openById(CONFIG.CRM_SPREADSHEET_ID);
+    var sheet = ss.getSheetByName(CONFIG.CRM_SHEET);
+
+    if (!sheet) {
+      throw new Error('CRM sheet "' + CONFIG.CRM_SHEET + '" not found');
+    }
+
+    var lastCol = sheet.getLastColumn();
+    if (lastCol < 1) {
+      throw new Error('CRM sheet appears to be empty');
+    }
+
+    // ----------------------------------------------------------
+    // 1. Read the full header row and locate key columns
+    // ----------------------------------------------------------
+    var headerValues = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+
+    var leadStatusCol       = -1; // 1-based; the col we rename
+    var contactStatusCol    = -1; // guard: already migrated?
+    var responseTimeCol     = -1; // 1-based; we'll rewrite its formula
+
+    headerValues.forEach(function(h, i) {
+      var hTrim = String(h).trim().toLowerCase();
+      if (hTrim === 'lead_status')          leadStatusCol    = i + 1;
+      if (hTrim === 'contact_status')       contactStatusCol = i + 1;
+      if (hTrim === 'response_time_hours')  responseTimeCol  = i + 1;
+    });
+
+    // Guard: already migrated
+    if (contactStatusCol !== -1) {
+      var msg = 'Migration skipped — contact_status column already exists at col ' + contactStatusCol;
+      logToSheet('updateCRMColumns', msg, 'OK');
+      Logger.log('updateCRMColumns: ' + msg);
+      return;
+    }
+
+    // Guard: source column not found
+    if (leadStatusCol === -1) {
+      throw new Error('lead_status column not found in header row — cannot migrate');
+    }
+
+    // ----------------------------------------------------------
+    // 2. Rename the existing lead_status header → contact_status
+    // ----------------------------------------------------------
+    sheet.getRange(1, leadStatusCol).setValue('contact_status');
+
+    // ----------------------------------------------------------
+    // 3. Insert 2 blank columns immediately after lead_status col
+    //    Sheets auto-shifts all data, formulas, and validations right.
+    // ----------------------------------------------------------
+    sheet.insertColumnsAfter(leadStatusCol, 2);
+
+    // After the insert, the new columns are at:
+    var bookingCol    = leadStatusCol + 1;  // L (booking_status)
+    var attendanceCol = leadStatusCol + 2;  // M (attendance_status)
+
+    // response_time_hours shifted right by 2 if it was after lead_status
+    if (responseTimeCol !== -1 && responseTimeCol > leadStatusCol) {
+      responseTimeCol += 2;
+    }
+
+    // ----------------------------------------------------------
+    // 4. Write headers for the two new columns
+    // ----------------------------------------------------------
+    sheet.getRange(1, bookingCol).setValue('booking_status');
+    sheet.getRange(1, attendanceCol).setValue('attendance_status');
+
+    // Apply matching blue header style to new cells
+    sheet.getRange(1, bookingCol, 1, 2)
+         .setBackground('#1a73e8')
+         .setFontColor('#ffffff')
+         .setFontWeight('bold');
+
+    // ----------------------------------------------------------
+    // 5. Replace old lead_status dropdown on K with contact_status list
+    // ----------------------------------------------------------
+    var dataRows = sheet.getMaxRows() - 1;
+
+    sheet.getRange(2, leadStatusCol, dataRows, 1)
+         .clearDataValidations()
+         .setDataValidation(
+           SpreadsheetApp.newDataValidation()
+             .requireValueInList(CONFIG.CONTACT_STATUS_VALUES, true)
+             .setAllowInvalid(false)
+             .build()
+         );
+
+    // ----------------------------------------------------------
+    // 6. Add dropdowns for the two new columns
+    // ----------------------------------------------------------
+    sheet.getRange(2, bookingCol, dataRows, 1)
+         .setDataValidation(
+           SpreadsheetApp.newDataValidation()
+             .requireValueInList(CONFIG.BOOKING_STATUS_VALUES, true)
+             .setAllowInvalid(false)
+             .build()
+         );
+
+    sheet.getRange(2, attendanceCol, dataRows, 1)
+         .setDataValidation(
+           SpreadsheetApp.newDataValidation()
+             .requireValueInList(CONFIG.ATTENDANCE_STATUS_VALUES, true)
+             .setAllowInvalid(false)
+             .build()
+         );
+
+    // ----------------------------------------------------------
+    // 7. Rewrite the response_time_hours formula
+    //    It must reference the first_contact_time column (one col to
+    //    its left).  Sheets updates formula refs automatically on insert,
+    //    but we rewrite explicitly to be certain and self-documenting.
+    // ----------------------------------------------------------
+    if (responseTimeCol !== -1) {
+      var firstContactCol = responseTimeCol - 1; // always one col to the left
+      var firstContactLetter = columnToLetter(firstContactCol);
+      var formula = '=IF(' + firstContactLetter + '2="","",ROUND(('
+                  + firstContactLetter + '2-B2)*24,1))';
+      sheet.getRange(2, responseTimeCol).setFormula(formula);
+      Logger.log('updateCRMColumns: set response_time formula in col '
+                 + columnToLetter(responseTimeCol) + '2 → ' + formula);
+    } else {
+      Logger.log('updateCRMColumns: response_time_hours column not found — formula not updated');
+    }
+
+    // ----------------------------------------------------------
+    // 8. Flush and log success
+    // ----------------------------------------------------------
+    SpreadsheetApp.flush();
+
+    var successMsg = 'Migration complete — lead_status (col '
+      + columnToLetter(leadStatusCol) + ') renamed to contact_status; '
+      + 'booking_status added at col ' + columnToLetter(bookingCol) + '; '
+      + 'attendance_status added at col ' + columnToLetter(attendanceCol);
+
+    logToSheet('updateCRMColumns', successMsg, 'OK');
+    Logger.log('updateCRMColumns: ' + successMsg);
+
+  } catch (e) {
+    logToSheet('updateCRMColumns', e.message, 'ERROR');
+    Logger.log('updateCRMColumns ERROR: ' + e.message);
+  }
+}
+
+/**
+ * Converts a 1-based column number to its spreadsheet letter(s).
+ * e.g. 1→A, 26→Z, 27→AA, 28→AB
+ *
+ * @param {number} col  1-based column index
+ * @returns {string}
+ */
+function columnToLetter(col) {
+  var letter = '';
+  while (col > 0) {
+    var rem = (col - 1) % 26;
+    letter  = String.fromCharCode(65 + rem) + letter;
+    col     = Math.floor((col - 1) / 26);
+  }
+  return letter;
+}
